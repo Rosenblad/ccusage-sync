@@ -1,0 +1,53 @@
+{
+  "name": "ccusage-sync",
+  "version": "0.1.0",
+  "description": "Run ccusage over Claude Code logs mirrored from all your machines",
+  "keywords": [
+    "ccusage",
+    "claude",
+    "claude-code",
+    "usage",
+    "tokens",
+    "sync",
+    "ssh",
+    "rsync"
+  ],
+  "license": "MIT",
+  "author": "Sebastian Nordqvist (https://github.com/Rosenblad)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rosenblad/ccusage-sync.git"
+  },
+  "homepage": "https://github.com/Rosenblad/ccusage-sync#readme",
+  "bugs": "https://github.com/Rosenblad/ccusage-sync/issues",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "bin": {
+    "ccusage-sync": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ccusage": "20.0.26",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "tsdown": "0.23.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}

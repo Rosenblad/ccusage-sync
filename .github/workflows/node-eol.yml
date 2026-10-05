@@ -1,0 +1,23 @@
+name: Node EOL reminder
+
+# Opens an issue when the minimum Node version in engines.node is within 60 days of end of life.
+on:
+  schedule:
+    - cron: '0 6 1 * *' # 06:00 UTC on the 1st of every month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/check-node-eol.ts
+        env:
+          GH_TOKEN: ${{ github.token }}

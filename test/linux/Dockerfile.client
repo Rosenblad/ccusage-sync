@@ -1,0 +1,10 @@
+# The client: installs the packed tarball on the oldest supported Node (run.sh passes NODE from engines.node).
+ARG NODE=22
+FROM node:${NODE}-slim
+RUN apt-get update && apt-get install -y --no-install-recommends rsync openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+COPY --chmod=600 id_ed25519 /root/.ssh/id_ed25519
+RUN chmod 700 /root/.ssh
+COPY machine-a/projects /root/.claude/projects
+COPY ccusage-sync.tgz statusline-input.json client-test.sh /tmp/
+CMD ["bash", "/tmp/client-test.sh"]

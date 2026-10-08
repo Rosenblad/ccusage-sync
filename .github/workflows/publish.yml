@@ -5,9 +5,11 @@ name: Publish
 # along with any ccusage bump merged since the last tag (git log v<last>.. -- package.json). Once it is
 # merged, the merge is tagged from an up-to-date main (git tag v<version> && git push origin v<version>). The release
 # goes public only once a maintainer approves it with 2FA (npm stage approve <id>, or on npmjs.com), so this workflow
-# can never release on its own. Authenticates with npm trusted publishing (OIDC), so there is no npm token secret, and
-# npm attaches provenance automatically. The trusted publisher on npmjs.com must name this repository and this workflow
-# file, and needs neither "Allow npm publish" nor "Allow npm dist-tag".
+# can never release on its own. It also drafts a GitHub release with the version's CHANGELOG.md section as its notes;
+# publish that once the npm release is approved (gh release edit v<version> --draft=false). Authenticates with npm
+# trusted publishing (OIDC), so there is no npm token secret, and npm attaches provenance automatically. The trusted
+# publisher on npmjs.com must name this repository and this workflow file, and needs neither "Allow npm publish" nor
+# "Allow npm dist-tag".
 on:
   push:
     tags: ['v*']
@@ -35,13 +37,24 @@ jobs:
             exit 1
           fi
       - name: Check CHANGELOG.md has an entry for the tag
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          if ! grep -q "^## \[${version//./\\.}\] - " CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## [$version] - <date>' heading; move the Unreleased entries under it"
-            exit 1
-          fi
+        run: node scripts/release-notes.ts "$GITHUB_REF_NAME" > /dev/null
       - run: npm ci # also builds dist/ via prepare
       - run: npm run typecheck
       - run: npm test
       - run: npm stage publish
+
+  # A draft, so the release isn't announced before the npm release it points to is approved.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # creates the release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node scripts/release-notes.ts "$GITHUB_REF_NAME" > notes.md
+      - run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

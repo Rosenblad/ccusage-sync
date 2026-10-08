@@ -34,6 +34,13 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
             exit 1
           fi
+      - name: Check CHANGELOG.md has an entry for the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^## \[${version//./\\.}\] - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version] - <date>' heading; move the Unreleased entries under it"
+            exit 1
+          fi
       - run: npm ci # also builds dist/ via prepare
       - run: npm run typecheck
       - run: npm test

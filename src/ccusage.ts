@@ -8,13 +8,12 @@ export interface CcusageCommand {
 }
 
 function nativePackage(platform: string, arch: string): string | undefined {
-  const supported = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64']
+  const supported = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']
   const key = `${platform}-${arch}`
   return supported.includes(key) ? `@ccusage/ccusage-${key}` : undefined
 }
 
-function ensureExecutable(path: string, platform: string): void {
-  if (platform === 'win32') return
+function ensureExecutable(path: string): void {
   if ((statSync(path).mode & 0o111) === 0) chmodSync(path, 0o755)
 }
 
@@ -37,8 +36,8 @@ export function resolveCcusage(
   const pkg = nativePackage(platform, arch)
   if (pkg) {
     try {
-      const binary = requireFromCcusage.resolve(`${pkg}/bin/ccusage${platform === 'win32' ? '.exe' : ''}`)
-      ensureExecutable(binary, platform)
+      const binary = requireFromCcusage.resolve(`${pkg}/bin/ccusage`)
+      ensureExecutable(binary)
       return { command: binary, args: [] }
     } catch {
       // Fall through to the launcher.

@@ -1,7 +1,6 @@
 import { constants } from 'node:os'
 
-export const FORWARDED_SIGNALS: NodeJS.Signals[] =
-  process.platform === 'win32' ? ['SIGINT', 'SIGBREAK', 'SIGHUP'] : ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']
+export const FORWARDED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']
 
 export interface SignalSource {
   on(signal: NodeJS.Signals, handler: () => void): unknown

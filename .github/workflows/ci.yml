@@ -31,8 +31,8 @@ jobs:
       - run: npm test
       - run: node dist/cli.js --version
 
-  # The packed tarball on the oldest supported Node, syncing over real ssh and rsync between two containers. The unit
-  # tests fake both.
+  # The packed tarball, installed in a container on the oldest supported Node (run.sh reads it from engines.node), syncing
+  # over real ssh and rsync between two containers. The unit tests fake both. The Node set up here only packs it.
   linux-smoke:
     strategy:
       fail-fast: false

@@ -147,7 +147,8 @@ rm -rf ~/.config/ccusage-sync ~/.local/share/ccusage-sync
 - **Claude Code only.** The unified commands (`ccusage-sync daily` etc.) include other agents from this machine only.
 - **No per-machine view.** Reports are summed; use `--hosts <name>` to look at one machine.
 - **Statusline freshness.** The statusline uses whatever was last synced.
-- **No background sync** yet, and syncing is not supported on Windows.
+- **No background sync** yet.
+- **No Windows support.** Only macOS and Linux, on this machine and on the hosts.
 
 ## Development
 

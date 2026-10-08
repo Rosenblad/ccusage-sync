@@ -9,12 +9,6 @@
       "rangeStrategy": "pin"
     },
     {
-      "description": "Merge ccusage minor and patch bumps once CI passes; majors wait for review",
-      "matchPackageNames": ["ccusage"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "automerge": true
-    },
-    {
       "description": "Type against the oldest supported Node major (engines.node), so newer Node APIs fail typecheck",
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "<23"

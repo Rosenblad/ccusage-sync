@@ -2,7 +2,7 @@ name: Publish
 
 # Stages a release on npm when a version tag is pushed. main only takes pull requests, so the version bump goes through
 # a PR: npm version <bump> --no-git-tag-version, and in CHANGELOG.md the Unreleased entries move under the new version,
-# along with any ccusage bump Renovate automerged since the last tag (git log v<last>.. -- package.json). Once it is
+# along with any ccusage bump merged since the last tag (git log v<last>.. -- package.json). Once it is
 # merged, the merge is tagged from an up-to-date main (git tag v<version> && git push origin v<version>). The release
 # goes public only once a maintainer approves it with 2FA (npm stage approve <id>, or on npmjs.com), so this workflow
 # can never release on its own. Authenticates with npm trusted publishing (OIDC), so there is no npm token secret, and

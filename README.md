@@ -112,6 +112,7 @@ case-insensitive. SSH aliases are not resolved, so if you rely on that, name the
 {
   "version": 1,
   "syncMaxAge": "5m",
+  "retention": "claude",
   "hosts": [
     { "name": "workstation", "ssh": "me@workstation.local" },
     { "name": "laptop", "ssh": "laptop", "paths": [".claude/projects"] }
@@ -123,6 +124,7 @@ case-insensitive. SSH aliases are not resolved, so if you rely on that, name the
 |---|---|
 | `version` | Always `1`. |
 | `syncMaxAge` | How long after a sync attempt reports skip contacting a host again: a number followed by `s`, `m`, `h` or `d`. Default `5m`. |
+| `retention` | How long mirrored transcripts are kept, by when they were last modified: `"claude"`, a duration such as `"90d"`, or `"forever"`. Default `"claude"`. See [Retention](#retention). |
 | `hosts[].name` | Short name used in `--hosts` and for the mirror directory. `local` is reserved. |
 | `hosts[].ssh` | SSH target, passed to `ssh` as-is. |
 | `hosts[].paths` | Optional. Claude Code `projects` directories on the host, relative to its home directory (or absolute). Default `[".claude/projects", ".config/claude/projects"]`. |
@@ -132,8 +134,30 @@ case-insensitive. SSH aliases are not resolved, so if you rely on that, name the
 `~/.local/share/ccusage-sync/hosts/<name>/` (or `$XDG_DATA_HOME/ccusage-sync/…`), one subdirectory per remote path,
 plus `state.json` with the last sync attempt, success and error.
 
-Only `*.jsonl` files are copied. Syncs are incremental and **never delete**: Claude Code prunes old transcripts after
-a while, and keeping them preserves your history beyond the host's retention.
+Only `*.jsonl` files are copied, and syncs are incremental. Files the host deletes are not deleted from the mirror;
+only [retention](#retention) removes them.
+
+### Retention
+
+Mirrors would otherwise grow without limit: transcripts hold the whole conversation, often tens of MB per day of use.
+So mirrored transcripts are kept only as long as `retention` says:
+
+- **`"claude"`** (default): as long as Claude Code keeps transcripts on this machine, its
+  [`cleanupPeriodDays`](https://code.claude.com/docs/en/settings-reference#cleanupperioddays) (30 days unless you
+  changed it). It is read from your managed settings file, the cached server-managed settings, or your user
+  `settings.json` (in `$CLAUDE_CONFIG_DIR` if set), whichever sets it first. Like Claude Code, it keeps everything if
+  one of those can't be read or parsed, or sets an invalid value. MDM profiles are not read; if your organization
+  sets the period that way, set `retention` to the same duration.
+- **A duration** such as `"90d"`: a number followed by `s`, `m`, `h` or `d`.
+- **`"forever"`**: never delete, keeping history beyond what the hosts keep. Mirrors then grow without limit.
+
+A sync fetches only transcripts the host modified within the window, then deletes mirrored ones last modified more
+than a day before the window began. The extra day keeps a clock difference between the machines from deleting a
+file that the next sync would fetch again. Deleting happens on every sync, also when the host can't be reached, and
+never in `--no-sync` runs or the statusline.
+
+Reports cover what is kept: with the default, that is the last 30 days or so from every machine, the same as your
+local logs. To report on longer periods, raise `retention` (and `cleanupPeriodDays` for local logs).
 
 ## Uninstall
 

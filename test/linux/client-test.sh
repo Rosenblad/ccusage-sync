@@ -38,7 +38,7 @@ expect_tokens "report syncs and sums both machines" 36105
 expect_tokens "--hosts local" 17218 --no-sync --hosts local
 expect_tokens "--hosts box" 18887 --no-sync --hosts box
 mirrors=$(find ~/.local/share/ccusage-sync/hosts/box -name '*.jsonl' 2>/dev/null | wc -l)
-[ "$mirrors" = 2 ] && pass "mirror holds the host's 2 jsonl files" || fail "mirror has $mirrors jsonl files"
+[ "$mirrors" = 2 ] && pass "mirror holds the host's 2 recent jsonl files, not the 40-day-old one" || fail "mirror has $mirrors jsonl files"
 
 ccusage-sync sync && pass "sync" || fail "sync"
 ccusage-sync hosts list

@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { HostConfig } from '../src/config.js'
 import { hostDir, slotDir } from '../src/paths.js'
@@ -9,11 +10,16 @@ import {
   formatBytes,
   formatOutcome,
   hostFailure,
+  listingFailure,
+  listScript,
   needsSync,
+  parseListing,
+  prune,
   type RunResult,
   readState,
   rsyncArgs,
   type Runner,
+  shellQuote,
   shouldSyncBeforeForward,
   type SlotResult,
   STALE_BREAKER_MS,
@@ -33,10 +39,7 @@ describe('rsyncArgs', () => {
   it('builds the exact argv', () => {
     expect(rsyncArgs('me@laptop', '.claude/projects', '/d/hosts/laptop/_claude_projects/projects')).toEqual([
       '-az',
-      '--prune-empty-dirs',
-      '--include=*/',
-      '--include=*.jsonl',
-      '--exclude=*',
+      '--files-from=-',
       '-e',
       'ssh -o BatchMode=yes -o ConnectTimeout=10',
       'me@laptop:.claude/projects/',
@@ -220,55 +223,185 @@ describe('error classification', () => {
   it('treats vanished source files (24) as synced', () => {
     expect(classifySlot(result(24))).toBe('ok')
   })
+
+  it('a failed listing', () => {
+    expect(listingFailure(result(255, 'me@h: Permission denied (publickey).'))).toBe('SSH auth failed (key-based auth required, BatchMode)')
+    expect(listingFailure(result(255, 'ssh: Could not resolve hostname h'))).toBe('cannot reach host: ssh: Could not resolve hostname h')
+    expect(listingFailure(result(2, 'sh: 1: find: not found'))).toBe('listing logs on host failed (exit 2): sh: 1: find: not found')
+    const enoent = Object.assign(new Error('spawn ssh ENOENT'), { code: 'ENOENT' })
+    expect(listingFailure(result(null, '', { error: enoent }))).toBe('cannot run ssh: spawn ssh ENOENT')
+  })
 })
 
-/** A runner that answers rsync calls from a script, keyed by remote path, and records each call. */
-function fakeRunner(answers: Record<string, RunResult | ((dest: string) => RunResult)>): Runner & { calls: string[][] } {
-  const calls: string[][] = []
-  const run = (async (_command: string, args: string[]) => {
-    calls.push(args)
+interface Call {
+  command: string
+  args: string[]
+  input: string | undefined
+}
+
+interface FakeHost {
+  /** The host's transcripts per remote path, listed by the fake listing. A path not here is missing. */
+  files?: Record<string, string[]>
+  /** The listing's result, instead of listing `files`. */
+  listing?: RunResult
+  /** rsync's result per remote path, instead of writing each requested file into the slot. */
+  rsync?: Record<string, RunResult>
+}
+
+/** Answers the listing from `files` and fetches the requested files, 1 KB each. Records every call. */
+function fakeRunner(host: FakeHost): Runner & { calls: Call[] } {
+  const calls: Call[] = []
+  const run = (async (command: string, args: string[], input?: string) => {
+    calls.push({ command, args, input })
+    if (command === 'ssh') {
+      if (host.listing) return host.listing
+      // Answer each path's line of the script, in script order.
+      const lines = input!.trimEnd().split('\n').map((line, i) => {
+        const path = Object.keys(host.files ?? {}).find((p) => line.startsWith(`(cd ${shellQuote(p)} `))
+        return path === undefined ? [`${i} missing`] : host.files![path]!.map((file) => `${i} ./${file}`)
+      })
+      return { ...ok, stdout: lines.flat().map((line) => `${line}\n`).join('') }
+    }
     const remote = args.at(-2)!.split(':')[1]!.replace(/\/$/, '')
+    if (host.rsync?.[remote]) return host.rsync[remote]
     const dest = args.at(-1)!
-    const answer = answers[remote] ?? result(23, 'No such file or directory')
-    return typeof answer === 'function' ? answer(dest) : answer
-  }) as Runner & { calls: string[][] }
+    for (const file of input!.trimEnd().split('\n')) {
+      mkdirSync(dirname(join(dest, file)), { recursive: true })
+      writeFileSync(join(dest, file), 'x'.repeat(1024))
+    }
+    return ok
+  }) as Runner & { calls: Call[] }
   run.calls = calls
   return run
 }
 
-/** Simulates rsync writing a file into the slot. */
-function writes(bytes: number) {
-  return (dest: string) => {
-    mkdirSync(join(dest, 'p'), { recursive: true })
-    writeFileSync(join(dest, 'p', 's.jsonl'), 'x'.repeat(bytes))
-    return ok
-  }
+const DAY = 86_400_000
+
+/** Writes a mirrored transcript last modified `ageMs` before `now`. */
+function mirrored(data: string, remotePath: string, file: string, now: Date, ageMs: number): string {
+  const path = join(slotDir(data, 'laptop', remotePath), 'projects', file)
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, 'x'.repeat(100))
+  const time = new Date(now.getTime() - ageMs)
+  utimesSync(path, time, time)
+  return path
 }
+
+describe('listScript', () => {
+  /** Runs the script with `sh -s` in `home`, as `ssh <host> sh -s` would. */
+  const list = (home: string, paths: string[], retentionMs?: number) => {
+    const result = spawnSync('sh', ['-s'], { cwd: home, input: listScript(paths, retentionMs), encoding: 'utf8' })
+    expect(result.status).toBe(0)
+    return parseListing(result.stdout, paths.length).map((files) => files?.sort())
+  }
+
+  const home = () => {
+    const dir = tempDir()
+    const write = (file: string, ageMs = 0) => {
+      mkdirSync(dirname(join(dir, file)), { recursive: true })
+      writeFileSync(join(dir, file), '{}\n')
+      const time = new Date(Date.now() - ageMs)
+      utimesSync(join(dir, file), time, time)
+    }
+    write('.claude/projects/-p/a.jsonl')
+    write('.claude/projects/-p/a/subagents/agent-x.jsonl')
+    write('.claude/projects/-p/old.jsonl', 40 * DAY)
+    write('.claude/projects/-p/notes.txt')
+    write("odd dir's/projects/b.jsonl")
+    return dir
+  }
+
+  it('lists every transcript under each path, and marks missing paths', () => {
+    expect(list(home(), ['.claude/projects', '.config/claude/projects', "odd dir's/projects"])).toEqual([
+      ['-p/a.jsonl', '-p/a/subagents/agent-x.jsonl', '-p/old.jsonl'],
+      undefined,
+      ['b.jsonl'],
+    ])
+  })
+
+  it('lists only transcripts modified within the retention window', () => {
+    expect(list(home(), ['.claude/projects'], 30 * DAY)).toEqual([['-p/a.jsonl', '-p/a/subagents/agent-x.jsonl']])
+    expect(listScript(['p'], 30 * DAY)).toContain('-mmin -43200')
+  })
+
+  it('parses only lines for known paths', () => {
+    expect(parseListing('motd\n0 ./a.jsonl\n7 ./b.jsonl\n1 missing\n', 2)).toEqual([['a.jsonl'], undefined])
+  })
+})
+
+describe('prune', () => {
+  it('deletes transcripts older than the cutoff and the directories that leaves empty', () => {
+    const data = tempDir()
+    const now = new Date()
+    const old = mirrored(data, 'p', '-a/old.jsonl', now, 40 * DAY)
+    const fresh = mirrored(data, 'p', '-b/fresh.jsonl', now, DAY)
+    mirrored(data, 'p', '-b/s/subagents/old.jsonl', now, 40 * DAY)
+    const projects = join(slotDir(data, 'laptop', 'p'), 'projects')
+    expect(prune(projects, now.getTime() - 30 * DAY)).toBe(200)
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(join(projects, '-a'))).toBe(false)
+    expect(existsSync(join(projects, '-b', 's'))).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
+    expect(existsSync(projects)).toBe(true)
+  })
+
+  it('ignores a missing directory', () => {
+    expect(prune(join(tempDir(), 'nope'), Date.now())).toBe(0)
+  })
+})
 
 describe('syncHost', () => {
   const host: HostConfig = { name: 'laptop', ssh: 'me@laptop' }
   let clock = 0
   const now = () => new Date(Date.UTC(2026, 9, 5, 12) + (clock += 500))
 
-  it('syncs each slot in order into its own dir and records success', async () => {
+  it('lists the host, then fetches only the listed files into each path\'s slot', async () => {
     const data = tempDir()
-    const run = fakeRunner({ '.claude/projects': writes(2048) })
+    const run = fakeRunner({ files: { '.claude/projects': ['-p/a.jsonl', '-p/a/subagents/x.jsonl'] } })
     const outcome = await syncHost(host, { dataDir: data, run, now })
-    expect(outcome).toMatchObject({ name: 'laptop', status: 'ok', bytesAdded: 2048 })
-    expect(run.calls.map((args) => args.at(-1))).toEqual([
-      `${slotDir(data, 'laptop', '.claude/projects')}/projects/`,
-      `${slotDir(data, 'laptop', '.config/claude/projects')}/projects/`,
+    expect(outcome).toMatchObject({ name: 'laptop', status: 'ok', bytesAdded: 2048, bytesPruned: 0 })
+    expect(run.calls.map((call) => [call.command, call.args.at(-1)])).toEqual([
+      ['ssh', '-s'],
+      ['rsync', `${slotDir(data, 'laptop', '.claude/projects')}/projects/`],
     ])
+    expect(run.calls[0]!.args).toEqual(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', 'me@laptop', 'sh', '-s'])
+    expect(run.calls[1]!.input).toBe('-p/a.jsonl\n-p/a/subagents/x.jsonl\n')
+    // No slot for the missing path.
+    expect(existsSync(slotDir(data, 'laptop', '.config/claude/projects'))).toBe(false)
     const state = readState(hostDir(data, 'laptop'))
     expect(state.lastError).toBeNull()
     expect(state.lastSuccess).not.toBeNull()
     expect(existsSync(join(hostDir(data, 'laptop'), '.lock'))).toBe(false)
   })
 
-  it('records a failure and keeps the previous lastSuccess', async () => {
+  it('lists only within the retention window', async () => {
+    const data = tempDir()
+    const run = fakeRunner({ files: { '.claude/projects': [] } })
+    await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })
+    expect(run.calls[0]!.input).toContain('-mmin -43200')
+    await syncHost(host, { dataDir: data, run, now })
+    expect(run.calls[1]!.input).not.toContain('-mmin')
+  })
+
+  it('a path with nothing to fetch is synced, not missing', async () => {
+    const data = tempDir()
+    const run = fakeRunner({ files: { '.claude/projects': [] } })
+    expect(await syncHost(host, { dataDir: data, run, now })).toMatchObject({ status: 'ok', bytesAdded: 0 })
+    expect(run.calls).toHaveLength(1)
+  })
+
+  it('fails when every path is missing', async () => {
+    const run = fakeRunner({ files: {} })
+    expect(await syncHost(host, { dataDir: tempDir(), run, now })).toMatchObject({
+      status: 'failed',
+      error: 'no Claude Code logs on host at .claude/projects, .config/claude/projects',
+    })
+  })
+
+  it('records a failed listing and keeps the previous lastSuccess', async () => {
     const data = tempDir()
     writeState(hostDir(data, 'laptop'), { lastAttempt: 'x', lastSuccess: '2026-10-03T12:00:00.000Z', lastError: null })
-    const run = fakeRunner({ '.claude/projects': result(255, 'ssh: Could not resolve hostname laptop') })
+    const run = fakeRunner({ listing: result(255, 'ssh: Could not resolve hostname laptop') })
     const outcome = await syncHost(host, { dataDir: data, run, now })
     expect(outcome).toEqual({
       name: 'laptop',
@@ -276,12 +409,47 @@ describe('syncHost', () => {
       error: 'cannot reach host: ssh: Could not resolve hostname laptop',
       lastSuccess: '2026-10-03T12:00:00.000Z',
     })
-    // An unreachable host is not retried for its other slots.
     expect(run.calls).toHaveLength(1)
     const state = readState(hostDir(data, 'laptop'))
     expect(state.lastError).toBe(outcome.status === 'failed' ? outcome.error : '')
     expect(state.lastSuccess).toBe('2026-10-03T12:00:00.000Z')
     expect(state.lastAttempt).not.toBe('x')
+  })
+
+  it('reports rsync failures after a listing', async () => {
+    const files = { '.claude/projects': ['a.jsonl'] }
+    const failure = async (rsync: RunResult) => {
+      const outcome = await syncHost(host, { dataDir: tempDir(), run: fakeRunner({ files, rsync: { '.claude/projects': rsync } }), now })
+      return outcome.status === 'failed' ? outcome.error : outcome.status
+    }
+    expect(await failure(result(127, 'bash: rsync: command not found'))).toMatch(/^rsync not found on host/)
+    // The listing found the path, so this is a file that vanished since, not a missing path.
+    expect(await failure(result(23, 'rsync: link_stat "a.jsonl" failed: No such file or directory (2)'))).toBe(
+      'rsync failed (exit 23): rsync: link_stat "a.jsonl" failed: No such file or directory (2)',
+    )
+  })
+
+  it('prunes mirrored files older than the window plus a day, even when the host is unreachable', async () => {
+    const data = tempDir()
+    const at = now()
+    const old = mirrored(data, '.claude/projects', '-p/old.jsonl', at, 32 * DAY)
+    const edge = mirrored(data, '.claude/projects', '-p/edge.jsonl', at, 30.5 * DAY)
+    const run = fakeRunner({ files: { '.claude/projects': [] } })
+    expect(await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })).toMatchObject({ status: 'ok', bytesPruned: 100 })
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(edge)).toBe(true)
+
+    const older = mirrored(data, '.claude/projects', '-p/older.jsonl', at, 40 * DAY)
+    const offline = fakeRunner({ listing: result(255, 'ssh: connect to host laptop port 22: Operation timed out') })
+    expect(await syncHost(host, { dataDir: data, run: offline, now, retentionMs: 30 * DAY })).toMatchObject({ status: 'failed' })
+    expect(existsSync(older)).toBe(false)
+  })
+
+  it('keeps everything without a retention window', async () => {
+    const data = tempDir()
+    const old = mirrored(data, '.claude/projects', '-p/old.jsonl', now(), 400 * DAY)
+    await syncHost(host, { dataDir: data, run: fakeRunner({ files: { '.claude/projects': [] } }), now })
+    expect(existsSync(old)).toBe(true)
   })
 
   it('skips a host whose lock is held', async () => {
@@ -292,16 +460,21 @@ describe('syncHost', () => {
     expect(run.calls).toHaveLength(0)
   })
 
-  it('records nothing when interrupted', async () => {
+  it('records and prunes nothing when interrupted', async () => {
     const data = tempDir()
+    const old = mirrored(data, '.claude/projects', '-p/old.jsonl', now(), 40 * DAY)
     let interrupted = false
     const run: Runner = async () => {
       interrupted = true
       return result(null, '', { signal: 'SIGINT' })
     }
-    expect(await syncHost(host, { dataDir: data, run, now, interrupted: () => interrupted })).toEqual({ name: 'laptop', status: 'interrupted' })
+    expect(await syncHost(host, { dataDir: data, run, now, retentionMs: DAY, interrupted: () => interrupted })).toEqual({
+      name: 'laptop',
+      status: 'interrupted',
+    })
     expect(existsSync(join(hostDir(data, 'laptop'), 'state.json'))).toBe(false)
     expect(existsSync(join(hostDir(data, 'laptop'), '.lock'))).toBe(false)
+    expect(existsSync(old)).toBe(true)
   })
 })
 
@@ -327,7 +500,7 @@ describe('syncHosts', () => {
 
   it('a failing host does not stop the others', async () => {
     const data = tempDir()
-    const run = fakeRunner({ good: ok, bad: result(255, 'Permission denied') })
+    const run: Runner = async (_command, args) => (args.includes('bad') ? result(255, 'Permission denied') : ok)
     const outcomes = await syncHosts(
       [
         { name: 'bad', ssh: 'bad', paths: ['bad'] },
@@ -351,7 +524,7 @@ describe('output', () => {
 
   it('prints only failures off a TTY', () => {
     const opts = { tty: false, now, nameWidth: 6 }
-    expect(formatOutcome({ name: 'laptop', status: 'ok', bytesAdded: 1, durationMs: 1400 }, opts)).toBeUndefined()
+    expect(formatOutcome({ name: 'laptop', status: 'ok', bytesAdded: 1, bytesPruned: 0, durationMs: 1400 }, opts)).toBeUndefined()
     expect(formatOutcome({ name: 'laptop', status: 'locked' }, opts)).toBeUndefined()
     expect(
       formatOutcome({ name: 'laptop', status: 'failed', error: 'cannot reach host', lastSuccess: '2026-10-03T12:00:00Z' }, opts),
@@ -360,7 +533,12 @@ describe('output', () => {
 
   it('prints every host on a TTY', () => {
     const opts = { tty: true, now, nameWidth: 8 }
-    expect(formatOutcome({ name: 'laptop', status: 'ok', bytesAdded: 34 * 1024, durationMs: 1400 }, opts)).toContain('laptop    +34 KB  1.4s')
+    expect(formatOutcome({ name: 'laptop', status: 'ok', bytesAdded: 34 * 1024, bytesPruned: 0, durationMs: 1400 }, opts)).toMatch(
+      /laptop {4}\+34 KB {2}1\.4s$/,
+    )
+    expect(formatOutcome({ name: 'laptop', status: 'ok', bytesAdded: 0, bytesPruned: 5 * 1024 * 1024, durationMs: 1400 }, opts)).toContain(
+      'pruned 5.0 MB',
+    )
     expect(formatOutcome({ name: 'laptop', status: 'failed', error: 'x', lastSuccess: null }, opts)).toContain('x (no mirror yet)')
   })
 })

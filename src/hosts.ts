@@ -11,7 +11,7 @@ import {
   validateHostName,
 } from './config.js'
 import { hostDir } from './paths.js'
-import { formatAgo, readState, type Runner } from './sync.js'
+import { formatAgo, readState, type Runner, shellQuote } from './sync.js'
 
 export interface HostsDeps {
   configFile: string
@@ -76,10 +76,6 @@ function parseFlags(args: string[], boolFlags: string[], valueFlags: string[]) {
     }
   }
   return { positionals, bools, values }
-}
-
-function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_./~-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 async function addHost(args: string[], deps: HostsDeps): Promise<number> {

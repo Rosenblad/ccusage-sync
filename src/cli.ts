@@ -10,6 +10,7 @@ import { type HostConfig, loadConfig, parseDuration } from './config.js'
 import { buildRoots, mirrorRoots, runCcusage, selectSources } from './forward.js'
 import { HOSTS_USAGE, hostsCommand } from './hosts.js'
 import { configFile, dataDir, defaultPathContext, localRoots } from './paths.js'
+import { retentionMs } from './retention.js'
 import { signalExitCode, trapSignals } from './signals.js'
 import { createRunner, formatOutcome, shouldSyncBeforeForward, staleHosts, syncHosts } from './sync.js'
 
@@ -35,6 +36,7 @@ async function sync(
   hosts: HostConfig[],
   skipped: HostConfig[],
   data: string,
+  retention: number | undefined,
 ): Promise<{ failed: boolean; signal?: NodeJS.Signals }> {
   const tty = Boolean(process.stderr.isTTY)
   const now = new Date()
@@ -54,7 +56,13 @@ async function sync(
   try {
     const outcomes = await syncHosts(
       hosts,
-      { dataDir: data, run: createRunner(children), now: () => new Date(), interrupted: () => signal !== undefined },
+      {
+        dataDir: data,
+        run: createRunner(children),
+        now: () => new Date(),
+        retentionMs: retention,
+        interrupted: () => signal !== undefined,
+      },
       (outcome) => {
         const line = formatOutcome(outcome, { tty, now, nameWidth })
         if (line) process.stderr.write(`${line}\n`)
@@ -125,7 +133,7 @@ async function main(argv: string[]): Promise<number> {
         )
         return config.hosts.length === 0 ? 1 : 0
       }
-      const result = await sync(selection.hosts, selection.skipped, dataDir(ctx))
+      const result = await sync(selection.hosts, selection.skipped, dataDir(ctx), retentionMs(config.retention, ctx))
       if (result.signal) return signalExitCode(result.signal)
       return result.failed ? 1 : 0
     }
@@ -141,7 +149,7 @@ async function main(argv: string[]): Promise<number> {
       if (shouldSyncBeforeForward(parsed.args, parsed.noSync)) {
         const stale = staleHosts(selection.hosts, data, parseDuration(config.syncMaxAge), new Date())
         if (stale.length > 0) {
-          const result = await sync(stale, selection.skipped, data)
+          const result = await sync(stale, selection.skipped, data, retentionMs(config.retention, ctx))
           if (result.signal) return signalExitCode(result.signal)
         }
       }

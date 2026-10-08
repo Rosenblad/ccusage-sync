@@ -16,7 +16,7 @@ import {
 } from '../src/config.js'
 import { tempDir } from './helpers.js'
 
-const valid = { version: 1, syncMaxAge: '5m', hosts: [{ name: 'laptop', ssh: 'me@laptop' }] }
+const valid = { version: 1, syncMaxAge: '5m', retention: 'claude', hosts: [{ name: 'laptop', ssh: 'me@laptop' }] }
 
 describe('loadConfig / saveConfig', () => {
   it('treats a missing file as no hosts', () => {
@@ -58,6 +58,8 @@ describe('validateConfig', () => {
     ['missing version', { hosts: [] }, /^version/],
     ['bad syncMaxAge', { version: 1, syncMaxAge: '5 minutes' }, /^syncMaxAge/],
     ['numeric syncMaxAge', { version: 1, syncMaxAge: 300 }, /^syncMaxAge/],
+    ['bad retention', { version: 1, retention: '30 days' }, /^retention/],
+    ['numeric retention', { version: 1, retention: 30 }, /^retention/],
     ['hosts not an array', { version: 1, hosts: {} }, /^hosts:/],
     ['host not an object', { version: 1, hosts: ['x'] }, /^hosts\[0\]/],
     ['uppercase name', { version: 1, hosts: [{ name: 'Laptop', ssh: 'x' }] }, /^hosts\[0\]\.name/],
@@ -76,6 +78,12 @@ describe('validateConfig', () => {
   it.each(cases)('rejects %s', (_label, raw, message) => {
     expect(() => validateConfig(raw)).toThrow(ConfigError)
     expect(() => validateConfig(raw)).toThrow(message)
+  })
+
+  it('accepts every retention form', () => {
+    for (const retention of ['claude', 'forever', '90d', '12h']) {
+      expect(validateConfig({ version: 1, retention }).retention).toBe(retention)
+    }
   })
 
   it('normalizes paths: strips ~/ and keeps absolute paths', () => {

@@ -5,5 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-server 
  && useradd -m -s /bin/bash me && usermod -p '*' me
 COPY id_ed25519.pub /home/me/.ssh/authorized_keys
 COPY machine-b/projects /home/me/.claude/projects
+# Fresh modification times, whatever the age of the checkout, plus a 40-day-old copy that retention must skip.
+RUN find /home/me/.claude/projects -type f -exec touch {} + \
+ && cp /home/me/.claude/projects/-home-v-other/22222222-2222-2222-2222-222222222222.jsonl /home/me/.claude/projects/-home-v-other/old.jsonl \
+ && touch -d '40 days ago' /home/me/.claude/projects/-home-v-other/old.jsonl
 RUN chown -R me:me /home/me/.ssh /home/me/.claude && chmod 700 /home/me/.ssh && chmod 600 /home/me/.ssh/authorized_keys
 CMD ["/usr/sbin/sshd", "-D", "-e"]

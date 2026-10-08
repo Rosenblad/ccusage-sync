@@ -11,12 +11,15 @@ export interface HostConfig {
 export interface Config {
   version: 1
   syncMaxAge: string
+  /** `claude` (follow Claude Code's cleanupPeriodDays), `forever`, or a duration. */
+  retention: string
   hosts: HostConfig[]
 }
 
 /** ccusage's two default roots, relative to the remote home. */
 export const DEFAULT_PATHS = ['.claude/projects', '.config/claude/projects']
 export const DEFAULT_SYNC_MAX_AGE = '5m'
+export const DEFAULT_RETENTION = 'claude'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 const DURATION_RE = /^(\d+)([smhd])$/
@@ -24,7 +27,7 @@ const DURATION_RE = /^(\d+)([smhd])$/
 export class ConfigError extends Error {}
 
 export function emptyConfig(): Config {
-  return { version: 1, syncMaxAge: DEFAULT_SYNC_MAX_AGE, hosts: [] }
+  return { version: 1, syncMaxAge: DEFAULT_SYNC_MAX_AGE, retention: DEFAULT_RETENTION, hosts: [] }
 }
 
 export function hostPaths(host: HostConfig): string[] {
@@ -62,12 +65,17 @@ function rejectUnknownKeys(obj: Record<string, unknown>, allowed: string[], wher
 
 export function validateConfig(raw: unknown): Config {
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object')
-  rejectUnknownKeys(raw, ['version', 'syncMaxAge', 'hosts'], '')
+  rejectUnknownKeys(raw, ['version', 'syncMaxAge', 'retention', 'hosts'], '')
   if (raw.version !== 1) throw new ConfigError(`version: must be 1, got ${JSON.stringify(raw.version)}`)
 
   const syncMaxAge = raw.syncMaxAge ?? DEFAULT_SYNC_MAX_AGE
   if (typeof syncMaxAge !== 'string' || !DURATION_RE.test(syncMaxAge)) {
     throw new ConfigError(`syncMaxAge: must match ${DURATION_RE.source} (e.g. "5m"), got ${JSON.stringify(syncMaxAge)}`)
+  }
+
+  const retention = raw.retention ?? DEFAULT_RETENTION
+  if (typeof retention !== 'string' || !(retention === 'claude' || retention === 'forever' || DURATION_RE.test(retention))) {
+    throw new ConfigError(`retention: must be "claude", "forever" or a duration (e.g. "90d"), got ${JSON.stringify(retention)}`)
   }
 
   const rawHosts = raw.hosts ?? []
@@ -96,7 +104,7 @@ export function validateConfig(raw: unknown): Config {
     return host
   })
 
-  return { version: 1, syncMaxAge, hosts }
+  return { version: 1, syncMaxAge, retention, hosts }
 }
 
 /** A missing file means no hosts. */

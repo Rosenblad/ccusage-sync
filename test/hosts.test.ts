@@ -96,7 +96,7 @@ describe('hosts add', () => {
 describe('hosts remove', () => {
   function withHost(confirmAnswer?: boolean) {
     const ctx = setup(undefined, confirmAnswer)
-    saveConfig(ctx.deps.configFile, { version: 1, syncMaxAge: '5m', retention: 'claude', hosts: [{ name: 'laptop', ssh: 'laptop' }, { name: 'ws', ssh: 'ws' }] })
+    saveConfig(ctx.deps.configFile, { version: 1, syncMaxAge: '5m', retention: 'claude', store: 'full', hosts: [{ name: 'laptop', ssh: 'laptop' }, { name: 'ws', ssh: 'ws' }] })
     const mirror = hostDir(ctx.deps.dataDir, 'laptop')
     const project = join(mirror, '_claude_projects', 'projects', 'p')
     mkdirSync(project, { recursive: true })
@@ -132,7 +132,7 @@ describe('hosts remove', () => {
 
   it('deletes a mirror without logs without asking', async () => {
     const { deps, out } = setup(undefined, false)
-    saveConfig(deps.configFile, { version: 1, syncMaxAge: '5m', retention: 'claude', hosts: [{ name: 'dead', ssh: 'dead' }] })
+    saveConfig(deps.configFile, { version: 1, syncMaxAge: '5m', retention: 'claude', store: 'full', hosts: [{ name: 'dead', ssh: 'dead' }] })
     const mirror = hostDir(deps.dataDir, 'dead')
     writeState(mirror, { lastAttempt: '2026-10-05T11:58:00Z', lastSuccess: null, lastError: 'cannot reach host' })
     expect(existsSync(mirror)).toBe(true)
@@ -165,6 +165,7 @@ describe('hosts list', () => {
       version: 1,
       syncMaxAge: '5m',
       retention: 'claude',
+      store: 'full',
       hosts: [{ name: 'laptop', ssh: 'me@laptop' }, { name: 'ws', ssh: 'ws', paths: ['/srv/p'] }, { name: 'mbp', ssh: 'mbp' }, { name: 'new', ssh: 'new' }],
     })
     writeState(hostDir(deps.dataDir, 'laptop'), { lastAttempt: '2026-10-05T11:58:00Z', lastSuccess: '2026-10-05T11:58:00Z', lastError: null })

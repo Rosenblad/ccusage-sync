@@ -6,7 +6,8 @@ import pc from 'picocolors'
 import pkg from '../package.json' with { type: 'json' }
 import { parseArgv, UsageError, validateHostNames } from './argv.js'
 import { CCUSAGE_MISSING, type CcusageCommand, ccusageVersion, resolveCcusage } from './ccusage.js'
-import { type HostConfig, loadConfig, parseDuration } from './config.js'
+import { type HostConfig, loadConfig, parseDuration, type Store } from './config.js'
+import { createStreamRunner } from './fetch.js'
 import { buildRoots, mirrorRoots, runCcusage, selectSources } from './forward.js'
 import { HOSTS_USAGE, hostsCommand } from './hosts.js'
 import { configFile, dataDir, defaultPathContext, localRoots } from './paths.js'
@@ -37,6 +38,7 @@ async function sync(
   skipped: HostConfig[],
   data: string,
   retention: number | undefined,
+  store: Store,
 ): Promise<{ failed: boolean; signal?: NodeJS.Signals }> {
   const tty = Boolean(process.stderr.isTTY)
   const now = new Date()
@@ -59,8 +61,10 @@ async function sync(
       {
         dataDir: data,
         run: createRunner(children),
+        stream: createStreamRunner(children),
         now: () => new Date(),
         retentionMs: retention,
+        store,
         interrupted: () => signal !== undefined,
       },
       (outcome) => {
@@ -133,7 +137,7 @@ async function main(argv: string[]): Promise<number> {
         )
         return config.hosts.length === 0 ? 1 : 0
       }
-      const result = await sync(selection.hosts, selection.skipped, dataDir(ctx), retentionMs(config.retention, ctx))
+      const result = await sync(selection.hosts, selection.skipped, dataDir(ctx), retentionMs(config.retention, ctx), config.store)
       if (result.signal) return signalExitCode(result.signal)
       return result.failed ? 1 : 0
     }
@@ -149,7 +153,7 @@ async function main(argv: string[]): Promise<number> {
       if (shouldSyncBeforeForward(parsed.args, parsed.noSync)) {
         const stale = staleHosts(selection.hosts, data, parseDuration(config.syncMaxAge), new Date())
         if (stale.length > 0) {
-          const result = await sync(stale, selection.skipped, data, retentionMs(config.retention, ctx))
+          const result = await sync(stale, selection.skipped, data, retentionMs(config.retention, ctx), config.store)
           if (result.signal) return signalExitCode(result.signal)
         }
       }

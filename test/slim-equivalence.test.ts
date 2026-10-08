@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { resolveCcusage } from '../src/ccusage.js'
+import { slotDir } from '../src/paths.js'
 import { completeLength, type SlimState, slimChunk, slimFileInPlace } from '../src/slim.js'
+import { syncHost } from '../src/sync.js'
+import { localHost } from './helpers.js'
 
 const FIXTURES = join(import.meta.dirname, 'fixtures', 'slim')
 const MACHINE_A = join(import.meta.dirname, 'fixtures', 'machine-a')
@@ -61,6 +64,8 @@ let base: string
 let home: string
 let full: string
 let slim: string
+/** The mirror `ccusage-sync sync` builds with store "usage", over two syncs. */
+let synced: string
 
 /** Each file's mtime: just after its last entry, as Claude Code would leave it. */
 function setMtimes(root: string): void {
@@ -151,6 +156,26 @@ beforeAll(() => {
   for (const file of transcripts(slim)) slimFileInPlace(file)
 })
 
+beforeAll(async () => {
+  // The host first has the first half of every file, cut mid-line, then all of it.
+  const remote = join(base, 'remote')
+  const remoteProjects = join(remote, '.claude', 'projects')
+  cpSync(join(full, 'projects'), remoteProjects, { recursive: true, preserveTimestamps: true })
+  const finished = transcripts(remoteProjects).map((file) => ({ file, data: readFileSync(file), mtime: statSync(file).mtime }))
+  for (const { file, data } of finished) writeFileSync(file, data.subarray(0, Math.floor(data.length / 2)))
+  const data = join(base, 'data')
+  const fake = localHost(remote)
+  const deps = { dataDir: data, ...fake, now: () => new Date(), retentionMs: 3650 * 86_400_000, store: 'usage' as const }
+  const host = { name: 'box', ssh: 'box', paths: ['.claude/projects'] }
+  expect(await syncHost(host, deps)).toMatchObject({ status: 'ok' })
+  for (const { file, data, mtime } of finished) {
+    writeFileSync(file, data)
+    utimesSync(file, mtime, mtime)
+  }
+  expect(await syncHost(host, deps)).toMatchObject({ status: 'ok' })
+  synced = slotDir(data, 'box', '.claude/projects')
+})
+
 afterAll(() => {
   if (base) rmSync(base, { recursive: true, force: true })
 })
@@ -195,6 +220,16 @@ describe('slimmed transcripts', () => {
   it.each(VARIANTS.map((variant) => [variant.join(' '), variant]))('report identically next to local logs: %s', (_, variant) => {
     const { full: expected, slim: actual } = compare(variant, `${MACHINE_A},${full}`, `${MACHINE_A},${slim}`)
     expect(actual).toBe(expected)
+  })
+
+  it.each(VARIANTS.map((variant) => [variant.join(' '), variant]))('report identically when synced: %s', (_, variant) => {
+    const { full: expected, slim: actual } = compare(variant, full, synced)
+    expect(actual).toBe(expected)
+  })
+
+  it('are the same whether slimmed in place or synced', () => {
+    const files = (root: string) => transcripts(root).map((file) => [relative(root, file), readFileSync(file, 'utf8')])
+    expect(files(join(synced, 'projects'))).toEqual(files(join(slim, 'projects')))
   })
 
   it('give the same statusline', () => {

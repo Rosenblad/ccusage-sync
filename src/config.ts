@@ -8,11 +8,15 @@ export interface HostConfig {
   paths?: string[]
 }
 
+/** `full` mirrors transcripts whole; `usage` keeps only what ccusage reads. */
+export type Store = 'full' | 'usage'
+
 export interface Config {
   version: 1
   syncMaxAge: string
   /** `claude` (follow Claude Code's cleanupPeriodDays), `forever`, or a duration. */
   retention: string
+  store: Store
   hosts: HostConfig[]
 }
 
@@ -20,6 +24,7 @@ export interface Config {
 export const DEFAULT_PATHS = ['.claude/projects', '.config/claude/projects']
 export const DEFAULT_SYNC_MAX_AGE = '5m'
 export const DEFAULT_RETENTION = 'claude'
+export const DEFAULT_STORE: Store = 'full'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 const DURATION_RE = /^(\d+)([smhd])$/
@@ -27,7 +32,7 @@ const DURATION_RE = /^(\d+)([smhd])$/
 export class ConfigError extends Error {}
 
 export function emptyConfig(): Config {
-  return { version: 1, syncMaxAge: DEFAULT_SYNC_MAX_AGE, retention: DEFAULT_RETENTION, hosts: [] }
+  return { version: 1, syncMaxAge: DEFAULT_SYNC_MAX_AGE, retention: DEFAULT_RETENTION, store: DEFAULT_STORE, hosts: [] }
 }
 
 export function hostPaths(host: HostConfig): string[] {
@@ -65,7 +70,7 @@ function rejectUnknownKeys(obj: Record<string, unknown>, allowed: string[], wher
 
 export function validateConfig(raw: unknown): Config {
   if (!isObject(raw)) throw new ConfigError('config must be a JSON object')
-  rejectUnknownKeys(raw, ['version', 'syncMaxAge', 'retention', 'hosts'], '')
+  rejectUnknownKeys(raw, ['version', 'syncMaxAge', 'retention', 'store', 'hosts'], '')
   if (raw.version !== 1) throw new ConfigError(`version: must be 1, got ${JSON.stringify(raw.version)}`)
 
   const syncMaxAge = raw.syncMaxAge ?? DEFAULT_SYNC_MAX_AGE
@@ -77,6 +82,11 @@ export function validateConfig(raw: unknown): Config {
   if (typeof retention !== 'string' || !(retention === 'claude' || retention === 'forever' || DURATION_RE.test(retention))) {
     throw new ConfigError(`retention: must be "claude", "forever" or a duration (e.g. "90d"), got ${JSON.stringify(retention)}`)
   }
+
+  const store = raw.store ?? DEFAULT_STORE
+  if (store !== 'full' && store !== 'usage') throw new ConfigError(`store: must be "full" or "usage", got ${JSON.stringify(store)}`)
+  // A slimmed mirror can only be fetched again in full while the host still has the files.
+  if (store === 'usage' && retention === 'forever') throw new ConfigError('store: "usage" cannot be used with retention "forever"')
 
   const rawHosts = raw.hosts ?? []
   if (!Array.isArray(rawHosts)) throw new ConfigError('hosts: must be an array')
@@ -104,7 +114,7 @@ export function validateConfig(raw: unknown): Config {
     return host
   })
 
-  return { version: 1, syncMaxAge, retention, hosts }
+  return { version: 1, syncMaxAge, retention, store, hosts }
 }
 
 /** A missing file means no hosts. */

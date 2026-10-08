@@ -16,7 +16,7 @@ import {
 } from '../src/config.js'
 import { tempDir } from './helpers.js'
 
-const valid = { version: 1, syncMaxAge: '5m', retention: 'claude', hosts: [{ name: 'laptop', ssh: 'me@laptop' }] }
+const valid = { version: 1, syncMaxAge: '5m', retention: 'claude', store: 'full', hosts: [{ name: 'laptop', ssh: 'me@laptop' }] }
 
 describe('loadConfig / saveConfig', () => {
   it('treats a missing file as no hosts', () => {
@@ -60,6 +60,8 @@ describe('validateConfig', () => {
     ['numeric syncMaxAge', { version: 1, syncMaxAge: 300 }, /^syncMaxAge/],
     ['bad retention', { version: 1, retention: '30 days' }, /^retention/],
     ['numeric retention', { version: 1, retention: 30 }, /^retention/],
+    ['bad store', { version: 1, store: 'slim' }, /^store: must be "full" or "usage"/],
+    ['usage store kept forever', { version: 1, store: 'usage', retention: 'forever' }, /^store: "usage" cannot be used with retention "forever"/],
     ['hosts not an array', { version: 1, hosts: {} }, /^hosts:/],
     ['host not an object', { version: 1, hosts: ['x'] }, /^hosts\[0\]/],
     ['uppercase name', { version: 1, hosts: [{ name: 'Laptop', ssh: 'x' }] }, /^hosts\[0\]\.name/],
@@ -84,6 +86,12 @@ describe('validateConfig', () => {
     for (const retention of ['claude', 'forever', '90d', '12h']) {
       expect(validateConfig({ version: 1, retention }).retention).toBe(retention)
     }
+  })
+
+  it('accepts both stores, full by default', () => {
+    expect(validateConfig({ version: 1 }).store).toBe('full')
+    expect(validateConfig({ version: 1, store: 'usage' }).store).toBe('usage')
+    expect(validateConfig({ version: 1, store: 'usage', retention: '30d' }).store).toBe('usage')
   })
 
   it('normalizes paths: strips ~/ and keeps absolute paths', () => {

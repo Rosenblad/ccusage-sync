@@ -51,6 +51,17 @@ got=$(tokens </tmp/out)
 
 out=$(ccusage-sync hosts remove dead </dev/null)
 [ "$out" = "Removed dead." ] && [ ! -e ~/.local/share/ccusage-sync/hosts/dead ] && pass "hosts remove of a never-synced host" || fail "hosts remove dead: $out"
+echo "== store usage"
+node -e 'const fs = require("fs"), f = process.argv[1], c = JSON.parse(fs.readFileSync(f, "utf8")); c.store = "usage"; fs.writeFileSync(f, JSON.stringify(c))' ~/.config/ccusage-sync/config.json
+ccusage-sync sync && pass "sync with store usage" || fail "sync with store usage"
+[ -f ~/.local/share/ccusage-sync/hosts/box/index.json ] && pass "mirror slimmed in place, with an index" || fail "no index.json after switching"
+expect_tokens "slimmed mirror" 18887 --no-sync --hosts box
+# A new usage line on the host, appended as Claude Code would: only the new bytes are fetched.
+ssh -o BatchMode=yes me@ccsync-host 'cat >> .claude/projects/-home-v-other/22222222-2222-2222-2222-222222222222.jsonl' \
+  <<<'{"type":"assistant","timestamp":"2026-10-02T10:00:00.000Z","sessionId":"22222222-2222-2222-2222-222222222222","requestId":"req_new","message":{"id":"msg_new","model":"claude-sonnet-4-5","usage":{"input_tokens":7,"output_tokens":3}}}'
+ccusage-sync sync && pass "sync of an appended line" || fail "sync of an appended line"
+expect_tokens "appended line counted" 18897 --no-sync --hosts box
+
 ccusage-sync hosts remove box --purge </dev/null && pass "hosts remove --purge" || fail "hosts remove --purge"
 [ ! -e ~/.local/share/ccusage-sync/hosts/box ] && pass "--purge deleted the mirror" || fail "mirror still there after --purge"
 expect_tokens "back to local only" 17218

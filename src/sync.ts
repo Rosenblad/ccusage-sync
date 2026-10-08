@@ -15,8 +15,9 @@ import {
 import { join } from 'node:path'
 import pc from 'picocolors'
 import { isStatusline } from './argv.js'
-import { type HostConfig, hostPaths } from './config.js'
-import { hostDir, slotDir } from './paths.js'
+import { type HostConfig, hostPaths, type Store } from './config.js'
+import { createStreamRunner, forgetMissing, migrateToUsage, type StreamRunner, syncUsage, USAGE_NEEDS_RETENTION } from './fetch.js'
+import { hostDir, slotDir, slotName } from './paths.js'
 import { PRUNE_MARGIN_MS } from './retention.js'
 
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10']
@@ -97,8 +98,9 @@ export function parseListing(stdout: string, count: number): (string[] | undefin
  * Fetches the files listed on stdin. No `--delete` (keeps history the remote has pruned), no `--partial` (never leaves a
  * truncated file in place). `-a` keeps the remote modification times, which retention goes by.
  */
-export function rsyncArgs(ssh: string, remotePath: string, dest: string): string[] {
-  return ['-az', '--files-from=-', '-e', SSH_COMMAND, `${ssh}:${remotePath.replace(/\/+$/, '')}/`, `${dest}/`]
+export function rsyncArgs(ssh: string, remotePath: string, dest: string, ignoreTimes = false): string[] {
+  // --ignore-times after the slimmed store: a slimmed copy must never pass rsync's size-and-time check.
+  return ['-az', ...(ignoreTimes ? ['--ignore-times'] : []), '--files-from=-', '-e', SSH_COMMAND, `${ssh}:${remotePath.replace(/\/+$/, '')}/`, `${dest}/`]
 }
 
 // --- state.json ---
@@ -107,6 +109,8 @@ export interface HostState {
   lastAttempt: string | null
   lastSuccess: string | null
   lastError: string | null
+  /** How the mirror is stored; absent means full. */
+  store?: Store
 }
 
 const EMPTY_STATE: HostState = { lastAttempt: null, lastSuccess: null, lastError: null }
@@ -299,7 +303,7 @@ export function hostFailure(slots: SlotResult[]): string | undefined {
   return withDetail(`rsync failed (${exit})`, other.stderr)
 }
 
-function withDetail(message: string, stderr: string): string {
+export function withDetail(message: string, stderr: string): string {
   const detail = firstLine(stderr)
   return detail ? `${message}: ${detail}` : message
 }
@@ -364,6 +368,10 @@ export interface SyncDeps {
   now: () => Date
   /** Keep mirrored transcripts modified within this window; undefined keeps them forever. */
   retentionMs?: number
+  /** `usage` keeps only what ccusage reads (src/slim.ts); the default `full` mirrors transcripts with rsync. */
+  store?: Store
+  /** Streams command output, for the usage store's fetches. */
+  stream?: StreamRunner
   isAlive?: (pid: number) => boolean
   /** Set once a signal arrives; hosts not yet started are skipped and nothing more is recorded. */
   interrupted?: () => boolean
@@ -386,30 +394,56 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
     let error: string | undefined
     let bytesAdded = 0
 
-    const listing = await deps.run('ssh', [...SSH_OPTIONS, host.ssh, 'sh', '-s'], listScript(paths, deps.retentionMs))
-    if (listing.code !== 0) {
-      error = listingFailure(listing)
-    } else {
-      const lists = parseListing(listing.stdout, paths.length)
-      const slots: SlotResult[] = []
-      for (const [i, path] of paths.entries()) {
-        if (deps.interrupted?.()) break
-        const files = lists[i]
-        if (!files?.length) {
-          slots.push({ code: 0, signal: null, stdout: '', stderr: '', path, kind: files ? 'ok' : 'missing' })
-          continue
-        }
-        const projects = projectsDir(path)
-        mkdirSync(projects, { recursive: true })
-        const before = dirSize(projects)
-        const result = await deps.run('rsync', rsyncArgs(host.ssh, path, projects), `${files.join('\n')}\n`)
-        bytesAdded += dirSize(projects) - before
-        // The listing found this path, so a file missing now vanished after it was listed: that's not a missing path.
-        const kind = classifySlot(result)
-        slots.push({ ...result, path, kind: kind === 'missing' ? 'other' : kind })
-        if (result.signal || FATAL_KINDS.includes(kind)) break
+    const store = deps.store ?? 'full'
+    const previous = readState(dir)
+    // How the mirror is stored. Back from usage to full, it stays usage until a sync has fetched the listed files whole.
+    let mirror = previous.store
+
+    if (store === 'usage' && deps.retentionMs === undefined) {
+      error = USAGE_NEEDS_RETENTION
+    } else if (store === 'usage') {
+      if (mirror !== 'usage') {
+        migrateToUsage(dir, paths.map(slotName))
+        mirror = 'usage'
+        writeState(dir, { ...previous, store: mirror })
       }
-      error = hostFailure(slots)
+      const result = await syncUsage(host.ssh, dir, paths, {
+        run: deps.run,
+        stream: deps.stream ?? createStreamRunner(),
+        now: deps.now,
+        retentionMs: deps.retentionMs,
+        interrupted: deps.interrupted,
+      })
+      error = result.error
+      bytesAdded = result.bytesAdded
+    } else {
+      const listing = await deps.run('ssh', [...SSH_OPTIONS, host.ssh, 'sh', '-s'], listScript(paths, deps.retentionMs))
+      if (listing.code !== 0) {
+        error = listingFailure(listing)
+      } else {
+        const lists = parseListing(listing.stdout, paths.length)
+        const slots: SlotResult[] = []
+        const ignoreTimes = mirror === 'usage'
+        for (const [i, path] of paths.entries()) {
+          if (deps.interrupted?.()) break
+          const files = lists[i]
+          if (!files?.length) {
+            slots.push({ code: 0, signal: null, stdout: '', stderr: '', path, kind: files ? 'ok' : 'missing' })
+            continue
+          }
+          const projects = projectsDir(path)
+          mkdirSync(projects, { recursive: true })
+          const before = dirSize(projects)
+          const result = await deps.run('rsync', rsyncArgs(host.ssh, path, projects, ignoreTimes), `${files.join('\n')}\n`)
+          bytesAdded += dirSize(projects) - before
+          // The listing found this path, so a file missing now vanished after it was listed: that's not a missing path.
+          const kind = classifySlot(result)
+          slots.push({ ...result, path, kind: kind === 'missing' ? 'other' : kind })
+          if (result.signal || FATAL_KINDS.includes(kind)) break
+        }
+        error = hostFailure(slots)
+        if (!error) mirror = undefined
+      }
     }
     if (deps.interrupted?.()) return { name: host.name, status: 'interrupted' }
 
@@ -419,14 +453,15 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
       const cutoff = deps.now().getTime() - deps.retentionMs - PRUNE_MARGIN_MS
       for (const path of paths) bytesPruned += prune(projectsDir(path), cutoff)
     }
+    if (mirror === 'usage') forgetMissing(dir)
 
     const finished = deps.now()
-    const previous = readState(dir)
     const state: HostState = {
       lastAttempt: started.toISOString(),
       lastSuccess: error ? previous.lastSuccess : finished.toISOString(),
       lastError: error ?? null,
     }
+    if (mirror) state.store = mirror
     writeState(dir, state)
     if (error) return { name: host.name, status: 'failed', error, lastSuccess: state.lastSuccess }
     return { name: host.name, status: 'ok', bytesAdded, bytesPruned, durationMs: finished.getTime() - started.getTime() }

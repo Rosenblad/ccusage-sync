@@ -464,6 +464,18 @@ describe('syncHost', () => {
     expect(existsSync(fresh)).toBe(true)
   })
 
+  it('removes a leftover slot once retention has emptied it, but keeps current ones', async () => {
+    const data = tempDir()
+    const at = now()
+    mirrored(data, '/srv/old/projects', '-p/old.jsonl', at, 40 * DAY)
+    mirrored(data, '.claude/projects', '-p/old.jsonl', at, 40 * DAY)
+    const run = fakeRunner({ files: { '.claude/projects': [] } })
+    expect(await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })).toMatchObject({ status: 'ok', bytesPruned: 200 })
+    expect(existsSync(slotDir(data, 'laptop', '/srv/old/projects'))).toBe(false)
+    expect(existsSync(join(slotDir(data, 'laptop', '.claude/projects'), 'projects'))).toBe(true)
+    expect(readState(hostDir(data, 'laptop')).slots).toEqual(['_claude_projects', '_config_claude_projects'])
+  })
+
   it('records its slots, and leaves alone dirs it did not create', async () => {
     const data = tempDir()
     const at = now()

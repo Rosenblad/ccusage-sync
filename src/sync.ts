@@ -17,7 +17,7 @@ import pc from 'picocolors'
 import { isStatusline } from './argv.js'
 import { type HostConfig, hostPaths, type Store } from './config.js'
 import { createStreamRunner, forgetMissing, migrateToUsage, type StreamRunner, syncUsage, USAGE_NEEDS_RETENTION } from './fetch.js'
-import { hostDir, scanSlots, slotDir, slotName } from './paths.js'
+import { hostDir, isSlotName, scanSlots, slotDir, slotName } from './paths.js'
 import { PRUNE_MARGIN_MS } from './retention.js'
 
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10']
@@ -120,7 +120,13 @@ const EMPTY_STATE: HostState = { lastAttempt: null, lastSuccess: null, lastError
 export function readState(dir: string): HostState {
   try {
     const raw = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')) as Partial<HostState>
-    return { ...EMPTY_STATE, ...raw }
+    const state = { ...EMPTY_STATE, ...raw }
+    // Slots become ccusage roots and get pruned, so a hand-edited name (`a,b`, `../x`) must not get through.
+    if (raw.slots !== undefined) {
+      if (Array.isArray(raw.slots)) state.slots = raw.slots.filter((slot) => typeof slot === 'string' && isSlotName(slot))
+      else delete state.slots
+    }
+    return state
   } catch {
     return { ...EMPTY_STATE }
   }

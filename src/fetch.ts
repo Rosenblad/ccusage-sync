@@ -23,7 +23,7 @@ import {
 } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { slotName } from './paths.js'
-import { completeLength, SLIM_FORMAT, type SlimState, slimChunk, slimFileInPlace } from './slim.js'
+import { completeLength, SLIM_FORMAT, type SlimState, slimChunk } from './slim.js'
 import { listingFailure, type RunResult, type Runner, SSH_OPTIONS, shellQuote, withDetail } from './sync.js'
 
 // --- index ---
@@ -106,8 +106,9 @@ function isTracked(file: string, entry: FileEntry | undefined): entry is FileEnt
 /**
  * Slims the given slots of a full mirror in place, without fetching anything: each file's offset is its current size
  * up to its last newline. Files still slimmed from an earlier spell in this store (their size matches their old entry)
- * are left alone: as they are if the format is current, else untracked, so they are fetched again. Other slots keep
- * their entries.
+ * are left alone: as they are if the format is current, else untracked, so they are fetched again. A slimmed file the
+ * index has lost is kept as it is, with no offset, so it is fetched again in full if its path is synced. Other slots
+ * keep their entries.
  *
  * Slimmed copies are written next to the originals and only renamed over them once the index is saved, so an
  * interrupted migration leaves either the full mirror, or an index whose size checks catch any file not renamed.
@@ -126,11 +127,20 @@ export function migrateToUsage(dir: string, slots: string[]): void {
         if (previous!.format === SLIM_FORMAT) entries[rel] = was
         continue
       }
+      const data = readFileSync(file)
+      const offset = completeLength(data)
+      const state: SlimState = { sessionSettled: false }
+      const slimmed = slimChunk(data.subarray(0, offset), state)
+      if (data.length > 0 && slimmed.equals(data)) {
+        // Already slimmed, as slimming changes every transcript once: how much of the remote file it holds is unknown.
+        entries[rel] = { offset: null, size: data.length, sessionSettled: false }
+        continue
+      }
       const tmp = `${file}.tmp`
-      writeFileSync(tmp, readFileSync(file))
+      writeFileSync(tmp, slimmed)
       const { atime, mtime } = statSync(file)
       utimesSync(tmp, atime, mtime)
-      entries[rel] = slimFileInPlace(tmp)
+      entries[rel] = { offset, size: slimmed.length, sessionSettled: state.sessionSettled }
       pending.push([tmp, file])
     }
   }

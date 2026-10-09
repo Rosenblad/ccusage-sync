@@ -224,6 +224,29 @@ describe('syncHost with store "usage"', () => {
     })
   })
 
+  it('keeps a slimmed leftover slot the index lost as it is, and fetches it again in full if its path comes back', async () => {
+    const t = setup()
+    // The first line ends where the slimmed copy does, so resuming from the slimmed size would look like an append.
+    const size = slimmed(lines(line(1), line(2))).length
+    const text = lines(line(1, 'x'.repeat(size - line(1).length - 1)), line(2))
+    expect(text.indexOf('\n')).toBe(size - 1)
+    t.write('-p/s1.jsonl', text)
+    await t.sync()
+    // As 0.2.0 left it after usage → full → usage with another path: the slot is slimmed, but not in the index.
+    const dir = hostDir(t.data, 'box')
+    mkdirSync(join(t.home, '.config/claude/projects'), { recursive: true })
+    t.host.paths = ['.config/claude/projects']
+    writeFileSync(join(dir, 'index.json'), JSON.stringify({ format: SLIM_FORMAT, slots: {} }))
+    await t.sync()
+    expect(readFileSync(t.local('-p/s1.jsonl'), 'utf8')).toBe(slimmed(text))
+    expect(t.index()['-p/s1.jsonl']).toEqual({ offset: null, size: slimmed(text).length, sessionSettled: false })
+
+    t.append('-p/s1.jsonl', lines(line(3)))
+    t.host.paths = [PATH]
+    await t.sync()
+    expect(readFileSync(t.local('-p/s1.jsonl'), 'utf8')).toBe(slimmed(text + lines(line(3))))
+  })
+
   it('slims a leftover slot that is the same dir as a current one only once', async () => {
     // As `_Claude_projects` and `_claude_projects` are on a case-insensitive filesystem.
     const t = setup()

@@ -5,6 +5,7 @@ import { LOCAL } from './argv.js'
 import { type Config, type HostConfig, hostPaths, isLocalHost } from './config.js'
 import { type Env, hasProjects, hostDir, hostSlots } from './paths.js'
 import { type SignalSource, signalExitCode, trapSignals } from './signals.js'
+import { knownSlots } from './sync.js'
 
 export interface Selection {
   includeLocal: boolean
@@ -33,7 +34,7 @@ export function selectSources(config: Config, hostsFlag: string[] | undefined, l
 export function mirrorRoots(dataDir: string, hosts: HostConfig[]): string[] {
   return hosts.flatMap((host) => {
     const dir = hostDir(dataDir, host.name)
-    return hostSlots(dir, hostPaths(host)).map((slot) => join(dir, slot))
+    return hostSlots(dir, knownSlots(dir), hostPaths(host)).map((slot) => join(dir, slot))
   })
 }
 

@@ -17,7 +17,7 @@ import pc from 'picocolors'
 import { isStatusline } from './argv.js'
 import { type HostConfig, hostPaths, type Store } from './config.js'
 import { createStreamRunner, forgetMissing, migrateToUsage, type StreamRunner, syncUsage, USAGE_NEEDS_RETENTION } from './fetch.js'
-import { hostDir, hostSlots, slotDir } from './paths.js'
+import { hostDir, scanSlots, slotDir, slotName } from './paths.js'
 import { PRUNE_MARGIN_MS } from './retention.js'
 
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10']
@@ -111,6 +111,8 @@ export interface HostState {
   lastError: string | null
   /** How the mirror is stored; absent means full. */
   store?: Store
+  /** Every slot a sync has written to, recorded beforehand. Absent for a mirror from before slots were recorded. */
+  slots?: string[]
 }
 
 const EMPTY_STATE: HostState = { lastAttempt: null, lastSuccess: null, lastError: null }
@@ -122,6 +124,11 @@ export function readState(dir: string): HostState {
   } catch {
     return { ...EMPTY_STATE }
   }
+}
+
+/** The slots a host's mirror has: those its state records, or, for a mirror synced before they were, those on disk. */
+export function knownSlots(dir: string, state: HostState = readState(dir)): string[] {
+  return state.slots ?? scanSlots(dir)
 }
 
 export function writeState(dir: string, state: HostState): void {
@@ -395,7 +402,11 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
     let bytesAdded = 0
 
     const store = deps.store ?? 'full'
-    const previous = readState(dir)
+    const recorded = readState(dir)
+    // Recorded before anything is written to them, so they are still read once their path is dropped from the config.
+    const slots = [...new Set([...knownSlots(dir, recorded), ...paths.map(slotName)])]
+    const previous: HostState = { ...recorded, slots }
+    if (recorded.slots?.length !== slots.length) writeState(dir, previous)
     // How the mirror is stored. Back from usage to full, it stays usage until a sync has fetched the listed files whole.
     let mirror = previous.store
 
@@ -403,7 +414,7 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
       error = USAGE_NEEDS_RETENTION
     } else if (store === 'usage') {
       if (mirror !== 'usage') {
-        migrateToUsage(dir, hostSlots(dir, paths))
+        migrateToUsage(dir, slots)
         mirror = 'usage'
         writeState(dir, { ...previous, store: mirror })
       }
@@ -451,7 +462,7 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
     let bytesPruned = 0
     if (deps.retentionMs !== undefined) {
       const cutoff = deps.now().getTime() - deps.retentionMs - PRUNE_MARGIN_MS
-      for (const slot of hostSlots(dir, paths)) bytesPruned += prune(join(dir, slot, 'projects'), cutoff)
+      for (const slot of slots) bytesPruned += prune(join(dir, slot, 'projects'), cutoff)
     }
     if (mirror === 'usage') forgetMissing(dir)
 
@@ -462,6 +473,7 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
       lastError: error ?? null,
     }
     if (mirror) state.store = mirror
+    state.slots = slots
     writeState(dir, state)
     if (error) return { name: host.name, status: 'failed', error, lastSuccess: state.lastSuccess }
     return { name: host.name, status: 'ok', bytesAdded, bytesPruned, durationMs: finished.getTime() - started.getTime() }

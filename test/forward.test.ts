@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { emptyConfig } from '../src/config.js'
 import { buildRoots, mirrorRoots, runCcusage, selectSources } from '../src/forward.js'
+import { writeState } from '../src/sync.js'
 import { tempDir } from './helpers.js'
 
 describe('selectSources', () => {
@@ -68,6 +69,14 @@ describe('buildRoots', () => {
       join(dir, 'hosts/b/_claude_projects'),
       join(dir, 'hosts/b/_old'),
     ])
+  })
+
+  it('reads only the slots a host has recorded once it has, not other dirs holding projects/', () => {
+    const dir = tempDir()
+    const host = join(dir, 'hosts', 'b')
+    for (const slot of ['_srv_p', '_old', '_old_backup']) mkdirSync(join(host, slot, 'projects'), { recursive: true })
+    writeState(host, { lastAttempt: null, lastSuccess: null, lastError: null, slots: ['_old', '_srv_p'] })
+    expect(mirrorRoots(dir, [{ name: 'b', ssh: 'b', paths: ['/srv/p'] }])).toEqual([join(host, '_srv_p'), join(host, '_old')])
   })
 })
 

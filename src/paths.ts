@@ -66,12 +66,14 @@ export function hasProjects(root: string): boolean {
   return isDir(join(root, 'projects')) || (basename(root) === 'projects' && isDir(root))
 }
 
+/** Every name `slotName` can give. */
+const SLOT_NAME = /^[A-Za-z0-9_]+$/
+
 /**
- * Slots in a host's mirror dir that aren't for any of `remotePaths`: left over from paths the host no longer has
- * configured. They still hold history the host may have deleted, so they are read, pruned and migrated like the rest.
+ * Slots found on disk: dirs holding `projects/`, named the way `slotName` names them. Only for a mirror synced before
+ * state.json recorded its slots; anything named otherwise (`x.bak`, `x copy`) was put there by someone else.
  */
-export function leftoverSlots(dir: string, remotePaths: string[]): string[] {
-  const current = remotePaths.map(slotName)
+export function scanSlots(dir: string): string[] {
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
@@ -79,12 +81,22 @@ export function leftoverSlots(dir: string, remotePaths: string[]): string[] {
     return []
   }
   return entries
-    .filter((entry) => entry.isDirectory() && !current.includes(entry.name) && isDir(join(dir, entry.name, 'projects')))
+    .filter((entry) => entry.isDirectory() && SLOT_NAME.test(entry.name) && isDir(join(dir, entry.name, 'projects')))
     .map((entry) => entry.name)
     .sort()
 }
 
+/**
+ * Of the slots a host's mirror is `known` to have, those that aren't for any of `remotePaths` and still hold
+ * `projects/`: left over from paths the host no longer has configured. They still hold history the host may have
+ * deleted, so they are read, pruned and migrated like the rest.
+ */
+export function leftoverSlots(dir: string, known: string[], remotePaths: string[]): string[] {
+  const current = remotePaths.map(slotName)
+  return known.filter((slot) => !current.includes(slot) && isDir(join(dir, slot, 'projects'))).sort()
+}
+
 /** Every slot of a host: those of its current paths (which may not exist yet), then leftover ones. */
-export function hostSlots(dir: string, remotePaths: string[]): string[] {
-  return [...new Set(remotePaths.map(slotName)), ...leftoverSlots(dir, remotePaths)]
+export function hostSlots(dir: string, known: string[], remotePaths: string[]): string[] {
+  return [...new Set(remotePaths.map(slotName)), ...leftoverSlots(dir, known, remotePaths)]
 }

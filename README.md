@@ -137,11 +137,12 @@ case-insensitive. SSH aliases are not resolved, so if you rely on that, name the
 ### Where mirrors live
 
 `~/.local/share/ccusage-sync/hosts/<name>/` (or `$XDG_DATA_HOME/ccusage-sync/…`), one subdirectory per remote path,
-plus `state.json` with the last sync attempt, success and error. A subdirectory for a path the host no longer has is
-kept, read and pruned like the others; `hosts list` counts these as `(+N old)`. Delete one yourself if you don't want
-its logs any more. Reports aren't inflated when two subdirectories hold the same transcripts, since ccusage counts each
-message once. With `"store": "usage"` there is also `index.json`,
-recording how much of each remote file has been fetched.
+plus `state.json` with the last sync attempt, success and error, and which subdirectories syncs have written to. A
+subdirectory for a path the host no longer has is kept, read and pruned like the others; `hosts list` counts these as
+`(+N old)`. Delete one yourself if you don't want its logs any more. Directories you add, such as a backup copy, are
+left alone. When two subdirectories hold the same transcripts, ccusage counts an entry with a message ID once, but an
+entry without one once per copy. With `"store": "usage"` there is also `index.json`, recording how much of each remote
+file has been fetched.
 
 Only `*.jsonl` files are copied, and syncs are incremental. Files the host deletes are not deleted from the mirror;
 only [retention](#retention) removes them.

@@ -112,6 +112,16 @@ describe('hosts edit', () => {
     expect(out()).toBe(`Updated laptop (laptop, .claude/projects).\nLogs mirrored from paths it no longer has are kept and still included in reports: ${old}\n`)
   })
 
+  it('keeps the old slots of this machine without claiming reports read them', async () => {
+    const { deps, out, err } = withHost()
+    saveConfig(deps.configFile, { version: 1, syncMaxAge: '5m', retention: 'claude', store: 'full', hosts: [{ name: 'mbp', ssh: 'me@mbp.local' }] })
+    const old = join(hostDir(deps.dataDir, 'mbp'), '_config_claude_projects')
+    mkdirSync(join(old, 'projects'), { recursive: true })
+    expect(await hostsCommand(['edit', 'mbp', '--path', '~/.claude/projects', '--no-verify'], deps)).toBe(0)
+    expect(out()).toBe(`Updated mbp (me@mbp.local, .claude/projects).\nLogs mirrored from paths it no longer has are kept: ${old}\n`)
+    expect(err()).toMatch(/looks like this machine, so it is skipped here/)
+  })
+
   it('replaces the ssh target, keeping the paths', async () => {
     const { deps, calls, out } = withHost()
     expect(await hostsCommand(['edit', 'ws', '--ssh=me@ws.lan'], deps)).toBe(0)

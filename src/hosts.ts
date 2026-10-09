@@ -142,14 +142,16 @@ async function editHost(args: string[], deps: HostsDeps): Promise<number> {
   config.hosts[i] = host
   saveConfig(deps.configFile, config)
   deps.stdout(`Updated ${name} (${host.ssh}, ${hostPaths(host).join(', ')}).\n`)
+  const local = isLocalHost(host, deps.hostname)
   const dir = hostDir(deps.dataDir, name)
   const leftover = leftoverSlots(dir, knownSlots(dir), hostPaths(host))
   if (leftover.length > 0) {
+    // Reports here leave this machine's mirror out (see selectSources), so only claim they read it for another host.
     deps.stdout(
-      `Logs mirrored from paths it no longer has are kept and still included in reports: ${leftover.map((slot) => join(dir, slot)).join(', ')}\n`,
+      `Logs mirrored from paths it no longer has are kept${local ? '' : ' and still included in reports'}: ${leftover.map((slot) => join(dir, slot)).join(', ')}\n`,
     )
   }
-  if (isLocalHost(host, deps.hostname)) {
+  if (local) {
     deps.stderr(`Note: ${name} looks like this machine, so it is skipped here (its logs are read locally).\n`)
   }
   return 0

@@ -3,12 +3,14 @@ import { join } from 'node:path'
 import pc from 'picocolors'
 import { UsageError } from './argv.js'
 import {
+  clashMessage,
   type HostConfig,
   hostPaths,
   isLocalHost,
   loadConfig,
   normalizeRemotePath,
   saveConfig,
+  slotClash,
   validateHostName,
 } from './config.js'
 import { hostDir, leftoverSlots } from './paths.js'
@@ -162,6 +164,8 @@ function checkSsh(ssh: string): string {
 function parsePaths(values: string[]): string[] {
   const paths = values.map(normalizeRemotePath)
   if (paths.some((path) => path === '')) throw new UsageError('--path must not be empty')
+  const clash = slotClash(paths)
+  if (clash) throw new UsageError(`--path: ${clashMessage(clash)}`)
   return [...new Set(paths)]
 }
 

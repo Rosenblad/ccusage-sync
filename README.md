@@ -132,7 +132,7 @@ case-insensitive. SSH aliases are not resolved, so if you rely on that, name the
 | `store` | `"full"` mirrors transcripts whole; `"usage"` keeps only what ccusage reads, about a tenth of the size. Default `"full"`. See [Store](#store). |
 | `hosts[].name` | Short name used in `--hosts` and for the mirror directory. `local` is reserved. |
 | `hosts[].ssh` | SSH target, passed to `ssh` as-is. |
-| `hosts[].paths` | Optional. Claude Code `projects` directories on the host, relative to its home directory (or absolute). Default `[".claude/projects", ".config/claude/projects"]`. |
+| `hosts[].paths` | Optional. Claude Code `projects` directories on the host, relative to its home directory (or absolute). Default `[".claude/projects", ".config/claude/projects"]`. Two paths whose mirror subdirectories would be the same (such as `.claude/projects` and `.Claude/projects`) are rejected. |
 
 ### Where mirrors live
 

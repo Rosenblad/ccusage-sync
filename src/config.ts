@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { LOCAL } from './argv.js'
+import { slotName } from './paths.js'
 
 export interface HostConfig {
   name: string
@@ -44,6 +45,25 @@ export function normalizeRemotePath(path: string): string {
   const trimmed = path.trim()
   if (trimmed === '~') return '.'
   return trimmed.startsWith('~/') ? trimmed.slice(2) : trimmed
+}
+
+/**
+ * Two of `paths` whose logs would be mirrored into one dir: `slotName` gives `a-b` and `a_b` the same slot, and on a
+ * case-insensitive filesystem (the macOS default) `_Claude_projects` and `_claude_projects` are one dir.
+ */
+export function slotClash(paths: string[]): [string, string] | undefined {
+  const seen = new Map<string, string>()
+  for (const path of paths) {
+    const slot = slotName(path).toLowerCase()
+    const other = seen.get(slot)
+    if (other !== undefined && other !== path) return [other, path]
+    seen.set(slot, path)
+  }
+  return undefined
+}
+
+export function clashMessage([a, b]: [string, string]): string {
+  return `'${a}' and '${b}' would be mirrored into the same folder; keep only one`
 }
 
 export function parseDuration(value: string): number {
@@ -106,10 +126,13 @@ export function validateConfig(raw: unknown): Config {
     const host: HostConfig = { name: entry.name, ssh: entry.ssh }
     if (entry.paths !== undefined) {
       if (!Array.isArray(entry.paths) || entry.paths.length === 0) throw new ConfigError(`${at}.paths: must be a non-empty array of strings`)
-      host.paths = entry.paths.map((path, j) => {
+      const paths = entry.paths.map((path, j) => {
         if (typeof path !== 'string' || normalizeRemotePath(path) === '') throw new ConfigError(`${at}.paths[${j}]: must be a non-empty string`)
         return normalizeRemotePath(path)
       })
+      const clash = slotClash(paths)
+      if (clash) throw new ConfigError(`${at}.paths: ${clashMessage(clash)}`)
+      host.paths = [...new Set(paths)]
     }
     return host
   })

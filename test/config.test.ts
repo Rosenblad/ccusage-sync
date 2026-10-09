@@ -74,6 +74,8 @@ describe('validateConfig', () => {
     ['empty paths', { version: 1, hosts: [{ name: 'a', ssh: 'x', paths: [] }] }, /^hosts\[0\]\.paths/],
     ['non-string path', { version: 1, hosts: [{ name: 'a', ssh: 'x', paths: [1] }] }, /^hosts\[0\]\.paths\[0\]/],
     ['empty path', { version: 1, hosts: [{ name: 'a', ssh: 'x', paths: ['~/'] }] }, /^hosts\[0\]\.paths\[0\]/],
+    ['paths differing only in case', { version: 1, hosts: [{ name: 'a', ssh: 'x', paths: ['.claude/projects', '~/.Claude/projects'] }] }, /^hosts\[0\]\.paths: '\.claude\/projects' and '\.Claude\/projects' would be mirrored into the same folder/],
+    ['paths with the same slot', { version: 1, hosts: [{ name: 'a', ssh: 'x', paths: ['/srv/a-b', '/srv/a_b'] }] }, /^hosts\[0\]\.paths: .*same folder/],
     ['unknown top-level field', { version: 1, sycnMaxAge: '1m' }, /^sycnMaxAge: unknown/],
     ['unknown host field', { version: 1, hosts: [{ name: 'a', ssh: 'x', path: [] }] }, /^hosts\[0\]\.path: unknown/],
   ]
@@ -97,6 +99,11 @@ describe('validateConfig', () => {
   it('normalizes paths: strips ~/ and keeps absolute paths', () => {
     const config = validateConfig({ version: 1, hosts: [{ name: 'a', ssh: 'x', paths: ['~/.claude/projects', '/srv/c/projects'] }] })
     expect(config.hosts[0]!.paths).toEqual(['.claude/projects', '/srv/c/projects'])
+  })
+
+  it('drops repeated paths', () => {
+    const config = validateConfig({ version: 1, hosts: [{ name: 'a', ssh: 'x', paths: ['~/.claude/projects', '.claude/projects'] }] })
+    expect(config.hosts[0]!.paths).toEqual(['.claude/projects'])
   })
 })
 

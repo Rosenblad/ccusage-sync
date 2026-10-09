@@ -136,6 +136,9 @@ describe('hosts edit', () => {
     await expect(hostsCommand(['edit', 'ws', '--ssh', 'a', '--ssh', 'b'], deps)).rejects.toThrow(/only be given once/)
     await expect(hostsCommand(['edit', 'ws', '--ssh', ' '], deps)).rejects.toThrow(/must not be empty/)
     await expect(hostsCommand(['edit', 'ws', '--path', ''], deps)).rejects.toThrow(/must not be empty/)
+    await expect(hostsCommand(['edit', 'ws', '--path', '.claude/projects', '--path', '.Claude/projects'], deps)).rejects.toThrow(
+      /--path: '\.claude\/projects' and '\.Claude\/projects' would be mirrored into the same folder/,
+    )
     await expect(hostsCommand(['edit', 'ws', 'extra', '--ssh', 'x'], deps)).rejects.toThrow(/expects <name>/)
   })
 })

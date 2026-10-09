@@ -16,6 +16,8 @@ report output.
 - Logs mirrored from a path a host no longer has are now read, pruned and slimmed like the rest. Before, changing a
   host's `paths` dropped them from reports without a warning. `hosts list` shows how many such directories each host
   has.
+- A host's `paths` are rejected when two of them would be mirrored into one directory, such as `.claude/projects` and
+  `.Claude/projects` (one directory on macOS) or `/srv/a-b` and `/srv/a_b`. Before, their logs were merged into it.
 
 ## [0.2.0] - 2026-10-08
 

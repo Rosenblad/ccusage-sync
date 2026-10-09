@@ -17,7 +17,7 @@ import pc from 'picocolors'
 import { isStatusline } from './argv.js'
 import { type HostConfig, hostPaths, type Store } from './config.js'
 import { createStreamRunner, forgetMissing, migrateToUsage, type StreamRunner, syncUsage, USAGE_NEEDS_RETENTION } from './fetch.js'
-import { hostDir, isSlotName, scanSlots, slotDir, slotName } from './paths.js'
+import { distinctSlots, hostDir, isSlotName, scanSlots, slotDir, slotName } from './paths.js'
 import { PRUNE_MARGIN_MS } from './retention.js'
 
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10']
@@ -410,9 +410,10 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
     const store = deps.store ?? 'full'
     const recorded = readState(dir)
     // Recorded before anything is written to them, so they are still read once their path is dropped from the config.
-    const slots = [...new Set([...knownSlots(dir, recorded), ...paths.map(slotName)])]
+    // Current names first: the usage index is keyed by them.
+    const slots = distinctSlots(dir, [...paths.map(slotName), ...knownSlots(dir, recorded)])
     const previous: HostState = { ...recorded, slots }
-    if (recorded.slots?.length !== slots.length) writeState(dir, previous)
+    if (!recorded.slots || slots.some((slot) => !recorded.slots!.includes(slot))) writeState(dir, previous)
     // How the mirror is stored. Back from usage to full, it stays usage until a sync has fetched the listed files whole.
     let mirror = previous.store
 

@@ -1,7 +1,7 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { configFile, dataDir, hasProjects, hostSlots, leftoverSlots, localRoots, scanSlots, slotDir, slotName } from '../src/paths.js'
+import { configFile, dataDir, distinctSlots, hasProjects, hostSlots, leftoverSlots, localRoots, scanSlots, slotDir, slotName } from '../src/paths.js'
 import { tempDir } from './helpers.js'
 
 const home = '/home/u'
@@ -64,6 +64,18 @@ describe('slots', () => {
     const known = ['_current', '_b', '_a', '_deleted']
     expect(leftoverSlots(dir, known, ['/current'])).toEqual(['_a', '_b'])
     expect(hostSlots(dir, known, ['/new', '/current', '/current'])).toEqual(['_new', '_current', '_a', '_b'])
+  })
+
+  it('counts slots that reach the same dir once, keeping the first name', () => {
+    // As `_Claude_projects` and `_claude_projects` are on a case-insensitive filesystem.
+    const dir = tempDir()
+    for (const slot of ['_a', '_b']) mkdirSync(join(dir, slot, 'projects'), { recursive: true })
+    symlinkSync('_a', join(dir, '_current'))
+    symlinkSync('_b', join(dir, '_b_alias'))
+    const known = ['_a', '_b', '_b_alias']
+    expect(distinctSlots(dir, ['_current', '_new', '_a', '_new', '_b'])).toEqual(['_current', '_new', '_b'])
+    expect(leftoverSlots(dir, known, ['/current'])).toEqual(['_b'])
+    expect(hostSlots(dir, known, ['/current'])).toEqual(['_current', '_b'])
   })
 })
 

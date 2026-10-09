@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, truncateSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { FETCH_MARKER, FrameParser, parseStatListing, readIndex, statListScript } from '../src/fetch.js'
@@ -203,6 +203,22 @@ describe('syncHost with store "usage"', () => {
     expect(readIndex(hostDir(t.data, 'box'))._config_claude_projects).toEqual({
       '-p/s0.jsonl': { offset: text.length, size: slimmed(text).length, sessionSettled: true },
     })
+  })
+
+  it('slims a leftover slot that is the same dir as a current one only once', async () => {
+    // As `_Claude_projects` and `_claude_projects` are on a case-insensitive filesystem.
+    const t = setup()
+    const text = lines(user(), line(1))
+    const dir = hostDir(t.data, 'box')
+    mkdirSync(join(dir, '_srv_old_projects', 'projects', '-p'), { recursive: true })
+    writeFileSync(join(dir, '_srv_old_projects', 'projects', '-p/s1.jsonl'), text)
+    symlinkSync('_srv_old_projects', join(dir, '_claude_projects'))
+    writeState(dir, { lastAttempt: null, lastSuccess: null, lastError: null, slots: ['_srv_old_projects'] })
+    t.write('-p/s1.jsonl', text)
+    expect(await t.sync()).toMatchObject({ status: 'ok', bytesAdded: 0 })
+    expect(readFileSync(t.local('-p/s1.jsonl'), 'utf8')).toBe(slimmed(text))
+    expect(Object.keys(readIndex(dir))).toEqual(['_claude_projects'])
+    expect(readState(dir).slots).toEqual(['_claude_projects'])
   })
 
   it('after a format change, fetches every mirrored file again, even one older than the window', async () => {

@@ -66,8 +66,10 @@ export function hasProjects(root: string): boolean {
   return isDir(join(root, 'projects')) || (basename(root) === 'projects' && isDir(root))
 }
 
-/** Every name `slotName` can give. */
-const SLOT_NAME = /^[A-Za-z0-9_]+$/
+/** Whether `slotName` can give this name. */
+export function isSlotName(name: string): boolean {
+  return /^[A-Za-z0-9_]+$/.test(name)
+}
 
 /**
  * Slots found on disk: dirs holding `projects/`, named the way `slotName` names them. Only for a mirror synced before
@@ -81,7 +83,7 @@ export function scanSlots(dir: string): string[] {
     return []
   }
   return entries
-    .filter((entry) => entry.isDirectory() && SLOT_NAME.test(entry.name) && isDir(join(dir, entry.name, 'projects')))
+    .filter((entry) => entry.isDirectory() && isSlotName(entry.name) && isDir(join(dir, entry.name, 'projects')))
     .map((entry) => entry.name)
     .sort()
 }

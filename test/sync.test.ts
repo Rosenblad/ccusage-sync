@@ -102,6 +102,14 @@ describe('state.json', () => {
     writeFileSync(join(dir, 'state.json'), '{')
     expect(readState(dir)).toEqual({ lastAttempt: null, lastSuccess: null, lastError: null })
   })
+
+  it('reads only slot names slotName can give', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ slots: ['_a', 'old,2025', '../..', 7, '_b'] }))
+    expect(readState(dir).slots).toEqual(['_a', '_b'])
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ slots: '_a' }))
+    expect(readState(dir)).not.toHaveProperty('slots')
+  })
 })
 
 describe('acquireLock', () => {

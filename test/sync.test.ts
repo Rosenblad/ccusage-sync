@@ -470,7 +470,7 @@ describe('syncHost', () => {
     mirrored(data, '/srv/old/projects', '-p/a.jsonl', at, DAY)
     const run = fakeRunner({ files: { '.claude/projects': [] } })
     await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })
-    expect(readState(hostDir(data, 'laptop')).slots).toEqual(['_srv_old_projects', '_claude_projects', '_config_claude_projects'])
+    expect(readState(hostDir(data, 'laptop')).slots).toEqual(['_claude_projects', '_config_claude_projects', '_srv_old_projects'])
 
     const copy = join(hostDir(data, 'laptop'), '_srv_old_projects_backup', 'projects', '-p', 'old.jsonl')
     mkdirSync(dirname(copy), { recursive: true })

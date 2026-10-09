@@ -205,6 +205,25 @@ describe('syncHost with store "usage"', () => {
     })
   })
 
+  it('slims a leftover slot of a mirror that 0.2.0 migrated without it, keeping the rest of the index', async () => {
+    const t = setup()
+    t.write('-p/s1.jsonl', lines(line(1)))
+    await t.sync()
+    const dir = hostDir(t.data, 'box')
+    const tracked = t.index()
+    const text = lines(user(), line(2))
+    const old = join(slotDir(t.data, 'box', '.config/claude/projects'), 'projects', '-p/s0.jsonl')
+    mkdirSync(dirname(old), { recursive: true })
+    writeFileSync(old, text)
+    writeState(dir, { lastAttempt: null, lastSuccess: null, lastError: null, store: 'usage' })
+    await t.sync()
+    expect(readFileSync(old, 'utf8')).toBe(slimmed(text))
+    expect(readIndex(dir)).toEqual({
+      _claude_projects: tracked,
+      _config_claude_projects: { '-p/s0.jsonl': { offset: text.length, size: slimmed(text).length, sessionSettled: true } },
+    })
+  })
+
   it('slims a leftover slot that is the same dir as a current one only once', async () => {
     // As `_Claude_projects` and `_claude_projects` are on a case-insensitive filesystem.
     const t = setup()

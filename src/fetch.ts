@@ -104,16 +104,17 @@ function isTracked(file: string, entry: FileEntry | undefined): entry is FileEnt
 // --- migration ---
 
 /**
- * Slims a full mirror in place, without fetching anything: each file's offset is its current size up to its last
- * newline. Files still slimmed from an earlier spell in this store (their size matches their old entry) are left
- * alone: as they are if the format is current, else untracked, so they are fetched again.
+ * Slims the given slots of a full mirror in place, without fetching anything: each file's offset is its current size
+ * up to its last newline. Files still slimmed from an earlier spell in this store (their size matches their old entry)
+ * are left alone: as they are if the format is current, else untracked, so they are fetched again. Other slots keep
+ * their entries.
  *
  * Slimmed copies are written next to the originals and only renamed over them once the index is saved, so an
  * interrupted migration leaves either the full mirror, or an index whose size checks catch any file not renamed.
  */
 export function migrateToUsage(dir: string, slots: string[]): void {
   const previous = readIndexFile(dir)
-  const index: Index = {}
+  const index: Index = previous?.format === SLIM_FORMAT ? { ...previous.slots } : {}
   const pending: [string, string][] = []
   for (const slot of slots) {
     const projects = join(dir, slot, 'projects')

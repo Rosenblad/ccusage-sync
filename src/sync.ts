@@ -16,7 +16,15 @@ import { join } from 'node:path'
 import pc from 'picocolors'
 import { isStatusline } from './argv.js'
 import { type HostConfig, hostPaths, type Store } from './config.js'
-import { createStreamRunner, forgetMissing, migrateToUsage, type StreamRunner, syncUsage, USAGE_NEEDS_RETENTION } from './fetch.js'
+import {
+  createStreamRunner,
+  forgetMissing,
+  migrateToUsage,
+  readIndex,
+  type StreamRunner,
+  syncUsage,
+  USAGE_NEEDS_RETENTION,
+} from './fetch.js'
 import { distinctSlots, hostDir, isSlotName, scanSlots, slotDir, slotName } from './paths.js'
 import { PRUNE_MARGIN_MS } from './retention.js'
 
@@ -424,6 +432,13 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
         migrateToUsage(dir, slots)
         mirror = 'usage'
         writeState(dir, { ...previous, store: mirror })
+      } else {
+        // Fetches fill only current slots. A leftover slot the index doesn't have may still be full: 0.2.0 migrated
+        // only the slots of current paths.
+        const current = paths.map(slotName)
+        const index = readIndex(dir)
+        const unslimmed = slots.filter((slot) => !current.includes(slot) && !(slot in index))
+        if (unslimmed.length > 0) migrateToUsage(dir, unslimmed)
       }
       const result = await syncUsage(host.ssh, dir, paths, {
         run: deps.run,

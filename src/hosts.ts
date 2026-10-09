@@ -4,6 +4,7 @@ import pc from 'picocolors'
 import { UsageError } from './argv.js'
 import {
   clashMessage,
+  type Config,
   type HostConfig,
   hostPaths,
   isLocalHost,
@@ -100,17 +101,9 @@ async function addHost(args: string[], deps: HostsDeps): Promise<number> {
   const paths = values.get('--path')
   if (paths) host.paths = parsePaths(paths)
 
-  if (!bools.has('--no-verify')) {
-    const ok = await verifyHost(host, deps)
-    if (!ok) return 1
-  }
-
-  config.hosts.push(host)
-  saveConfig(deps.configFile, config)
+  if (!(await saveHost(config, host, !bools.has('--no-verify'), deps))) return 1
   deps.stdout(`Added ${name} (${ssh}). Run \`ccusage-sync sync\` to fetch its logs.\n`)
-  if (isLocalHost(host, deps.hostname)) {
-    deps.stderr(`Note: ${name} looks like this machine, so it is skipped here (its logs are read locally).\n`)
-  }
+  noteIfLocal(host, deps)
   return 0
 }
 
@@ -126,35 +119,43 @@ async function editHost(args: string[], deps: HostsDeps): Promise<number> {
   if (ssh && ssh.length > 1) throw new UsageError('--ssh may only be given once')
 
   const config = loadConfig(deps.configFile)
-  const i = config.hosts.findIndex((host) => host.name === name)
-  if (i === -1) {
-    throw new UsageError(`Unknown host '${name}'. Configured: ${config.hosts.map((host) => host.name).join(', ') || '(none)'}`)
-  }
-  const host: HostConfig = { ...config.hosts[i]! }
+  const existing = config.hosts.find((host) => host.name === name)
+  if (!existing) throw unknownHost(name, config)
+  const host: HostConfig = { ...existing }
   if (ssh) host.ssh = checkSsh(ssh[0]!)
   if (paths) host.paths = parsePaths(paths)
 
-  if (!bools.has('--no-verify')) {
-    const ok = await verifyHost(host, deps)
-    if (!ok) return 1
-  }
-
-  config.hosts[i] = host
-  saveConfig(deps.configFile, config)
+  if (!(await saveHost(config, host, !bools.has('--no-verify'), deps))) return 1
   deps.stdout(`Updated ${name} (${host.ssh}, ${hostPaths(host).join(', ')}).\n`)
-  const local = isLocalHost(host, deps.hostname)
   const dir = hostDir(deps.dataDir, name)
   const leftover = leftoverSlots(dir, knownSlots(dir), hostPaths(host))
   if (leftover.length > 0) {
     // Reports here leave this machine's mirror out (see selectSources), so only claim they read it for another host.
-    deps.stdout(
-      `Logs mirrored from paths it no longer has are kept${local ? '' : ' and still included in reports'}: ${leftover.map((slot) => join(dir, slot)).join(', ')}\n`,
-    )
+    const read = isLocalHost(host, deps.hostname) ? '' : ' and still included in reports'
+    deps.stdout(`Logs mirrored from paths it no longer has are kept${read}: ${leftover.map((slot) => join(dir, slot)).join(', ')}\n`)
   }
-  if (local) {
-    deps.stderr(`Note: ${name} looks like this machine, so it is skipped here (its logs are read locally).\n`)
-  }
+  noteIfLocal(host, deps)
   return 0
+}
+
+/** Verifies `host` unless told not to, then saves it to `config` in place of any host of its name. False if unverified. */
+async function saveHost(config: Config, host: HostConfig, verify: boolean, deps: HostsDeps): Promise<boolean> {
+  if (verify && !(await verifyHost(host, deps))) return false
+  const i = config.hosts.findIndex((other) => other.name === host.name)
+  if (i === -1) config.hosts.push(host)
+  else config.hosts[i] = host
+  saveConfig(deps.configFile, config)
+  return true
+}
+
+function noteIfLocal(host: HostConfig, deps: HostsDeps): void {
+  if (isLocalHost(host, deps.hostname)) {
+    deps.stderr(`Note: ${host.name} looks like this machine, so it is skipped here (its logs are read locally).\n`)
+  }
+}
+
+function unknownHost(name: string, config: Config): UsageError {
+  return new UsageError(`Unknown host '${name}'. Configured: ${config.hosts.map((host) => host.name).join(', ') || '(none)'}`)
 }
 
 function checkSsh(ssh: string): string {
@@ -213,9 +214,7 @@ async function removeHost(args: string[], deps: HostsDeps): Promise<number> {
   const configured = config.hosts.some((host) => host.name === name)
 
   // An unconfigured name is still accepted if its mirror is left over, so `--purge` can be rerun.
-  if (!configured && !existsSync(mirror)) {
-    throw new UsageError(`Unknown host '${name}'. Configured: ${config.hosts.map((host) => host.name).join(', ') || '(none)'}`)
-  }
+  if (!configured && !existsSync(mirror)) throw unknownHost(name, config)
   if (configured) {
     config.hosts = config.hosts.filter((host) => host.name !== name)
     saveConfig(deps.configFile, config)

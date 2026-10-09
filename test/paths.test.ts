@@ -1,7 +1,7 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { configFile, dataDir, hasProjects, localRoots, slotDir, slotName } from '../src/paths.js'
+import { configFile, dataDir, hasProjects, hostSlots, leftoverSlots, localRoots, slotDir, slotName } from '../src/paths.js'
 import { tempDir } from './helpers.js'
 
 const home = '/home/u'
@@ -47,6 +47,16 @@ describe('slots', () => {
 
   it('places slots under the host dir', () => {
     expect(slotDir('/d', 'laptop', '.claude/projects')).toBe('/d/hosts/laptop/_claude_projects')
+  })
+
+  it('finds slots left over from paths no longer configured: dirs holding projects/', () => {
+    const dir = tempDir()
+    for (const slot of ['_b', '_a', '_current']) mkdirSync(join(dir, slot, 'projects'), { recursive: true })
+    mkdirSync(join(dir, 'projects')) // a slot named projects, but without projects/ inside
+    writeFileSync(join(dir, 'state.json'), '{}')
+    expect(leftoverSlots(dir, ['/current'])).toEqual(['_a', '_b'])
+    expect(hostSlots(dir, ['/new', '/current', '/current'])).toEqual(['_new', '_current', '_a', '_b'])
+    expect(leftoverSlots(join(dir, 'missing'), [])).toEqual([])
   })
 })
 

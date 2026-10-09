@@ -17,7 +17,7 @@ import pc from 'picocolors'
 import { isStatusline } from './argv.js'
 import { type HostConfig, hostPaths, type Store } from './config.js'
 import { createStreamRunner, forgetMissing, migrateToUsage, type StreamRunner, syncUsage, USAGE_NEEDS_RETENTION } from './fetch.js'
-import { hostDir, slotDir, slotName } from './paths.js'
+import { hostDir, hostSlots, slotDir } from './paths.js'
 import { PRUNE_MARGIN_MS } from './retention.js'
 
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10']
@@ -403,7 +403,7 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
       error = USAGE_NEEDS_RETENTION
     } else if (store === 'usage') {
       if (mirror !== 'usage') {
-        migrateToUsage(dir, paths.map(slotName))
+        migrateToUsage(dir, hostSlots(dir, paths))
         mirror = 'usage'
         writeState(dir, { ...previous, store: mirror })
       }
@@ -451,7 +451,7 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
     let bytesPruned = 0
     if (deps.retentionMs !== undefined) {
       const cutoff = deps.now().getTime() - deps.retentionMs - PRUNE_MARGIN_MS
-      for (const path of paths) bytesPruned += prune(projectsDir(path), cutoff)
+      for (const slot of hostSlots(dir, paths)) bytesPruned += prune(join(dir, slot, 'projects'), cutoff)
     }
     if (mirror === 'usage') forgetMissing(dir)
 

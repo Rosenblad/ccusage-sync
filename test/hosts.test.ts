@@ -67,6 +67,7 @@ describe('hosts add', () => {
     const { deps, err } = setup({ code: 1, signal: null, stdout: '', stderr: 'ls: .claude/projects: No such file or directory' })
     expect(await hostsCommand(['add', 'empty', 'empty'], deps)).toBe(0)
     expect(err()).toMatch(/none of these paths exist/)
+    expect(err()).toMatch(/hosts edit empty --path <dir>\/projects/)
     expect(loadConfig(deps.configFile).hosts).toHaveLength(1)
   })
 
@@ -79,7 +80,7 @@ describe('hosts add', () => {
   it('rejects duplicate and invalid names', async () => {
     const { deps } = setup()
     await hostsCommand(['add', 'x', 'x'], deps)
-    await expect(hostsCommand(['add', 'x', 'y'], deps)).rejects.toThrow(/already exists/)
+    await expect(hostsCommand(['add', 'x', 'y'], deps)).rejects.toThrow(/already exists. Change it with: ccusage-sync hosts edit x/)
     await expect(hostsCommand(['add', 'local', 'y'], deps)).rejects.toThrow(ConfigError)
     await expect(hostsCommand(['add', 'Bad', 'y'], deps)).rejects.toThrow(ConfigError)
     await expect(hostsCommand(['add', 'only-name'], deps)).rejects.toThrow(UsageError)
@@ -90,6 +91,52 @@ describe('hosts add', () => {
     const { deps, err } = setup()
     await hostsCommand(['add', 'mbp', 'me@mbp.local', '--no-verify'], deps)
     expect(err()).toMatch(/looks like this machine/)
+  })
+})
+
+describe('hosts edit', () => {
+  function withHost(answer?: RunResult) {
+    const ctx = setup(answer)
+    saveConfig(ctx.deps.configFile, { version: 1, syncMaxAge: '5m', retention: 'claude', store: 'full', hosts: [{ name: 'laptop', ssh: 'laptop' }, { name: 'ws', ssh: 'ws' }] })
+    return ctx
+  }
+
+  it('replaces the paths, verifies them and keeps the old slots, which reports still read', async () => {
+    const { deps, calls, out } = withHost()
+    const old = join(hostDir(deps.dataDir, 'laptop'), '_config_claude_projects')
+    mkdirSync(join(old, 'projects'), { recursive: true })
+    expect(await hostsCommand(['edit', 'laptop', '--path', '~/.claude/projects'], deps)).toBe(0)
+    expect(calls.map((call) => call.args.at(-1))).toEqual(['ls -d .claude/projects'])
+    expect(loadConfig(deps.configFile).hosts).toEqual([{ name: 'laptop', ssh: 'laptop', paths: ['.claude/projects'] }, { name: 'ws', ssh: 'ws' }])
+    expect(existsSync(old)).toBe(true)
+    expect(out()).toBe(`Updated laptop (laptop, .claude/projects).\nLogs mirrored from paths it no longer has are kept and still included in reports: ${old}\n`)
+  })
+
+  it('replaces the ssh target, keeping the paths', async () => {
+    const { deps, calls, out } = withHost()
+    expect(await hostsCommand(['edit', 'ws', '--ssh=me@ws.lan'], deps)).toBe(0)
+    expect(calls[0]!.args.slice(-2)).toEqual(['me@ws.lan', 'ls -d .claude/projects .config/claude/projects'])
+    expect(loadConfig(deps.configFile).hosts[1]).toEqual({ name: 'ws', ssh: 'me@ws.lan' })
+    expect(out()).toBe('Updated ws (me@ws.lan, .claude/projects, .config/claude/projects).\n')
+  })
+
+  it('saves nothing when the host cannot be reached, unless --no-verify', async () => {
+    const { deps, calls } = withHost({ code: 255, signal: null, stdout: '', stderr: 'ssh: Could not resolve hostname nope' })
+    expect(await hostsCommand(['edit', 'ws', '--ssh', 'nope'], deps)).toBe(1)
+    expect(loadConfig(deps.configFile).hosts[1]).toEqual({ name: 'ws', ssh: 'ws' })
+    expect(await hostsCommand(['edit', 'ws', '--ssh', 'nope', '--no-verify'], deps)).toBe(0)
+    expect(loadConfig(deps.configFile).hosts[1]).toEqual({ name: 'ws', ssh: 'nope' })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('rejects an unknown host and edits that change nothing', async () => {
+    const { deps } = withHost()
+    await expect(hostsCommand(['edit', 'nope', '--ssh', 'x'], deps)).rejects.toThrow(/Unknown host 'nope'.*laptop, ws/)
+    await expect(hostsCommand(['edit', 'ws'], deps)).rejects.toThrow(/expects --ssh or --path/)
+    await expect(hostsCommand(['edit', 'ws', '--ssh', 'a', '--ssh', 'b'], deps)).rejects.toThrow(/only be given once/)
+    await expect(hostsCommand(['edit', 'ws', '--ssh', ' '], deps)).rejects.toThrow(/must not be empty/)
+    await expect(hostsCommand(['edit', 'ws', '--path', ''], deps)).rejects.toThrow(/must not be empty/)
+    await expect(hostsCommand(['edit', 'ws', 'extra', '--ssh', 'x'], deps)).rejects.toThrow(/expects <name>/)
   })
 })
 
@@ -170,11 +217,12 @@ describe('hosts list', () => {
     })
     writeState(hostDir(deps.dataDir, 'laptop'), { lastAttempt: '2026-10-05T11:58:00Z', lastSuccess: '2026-10-05T11:58:00Z', lastError: null })
     writeState(hostDir(deps.dataDir, 'ws'), { lastAttempt: '2026-10-05T11:00:00Z', lastSuccess: '2026-10-03T12:00:00Z', lastError: 'cannot reach host' })
+    for (const slot of ['_srv_p', '_claude_projects', '_config_claude_projects']) mkdirSync(join(hostDir(deps.dataDir, 'ws'), slot, 'projects'), { recursive: true })
     expect(await hostsCommand(['list'], deps)).toBe(0)
     const lines = out().split('\n')
     expect(lines[0]).toMatch(/NAME\s+SSH\s+PATHS\s+LAST SYNC\s+STATUS/)
     expect(lines[1]).toMatch(/laptop\s+me@laptop\s+\.claude\/projects, \.config\/claude\/projects\s+2m ago\s+ok/)
-    expect(lines[2]).toMatch(/ws\s+ws\s+\/srv\/p\s+2d ago\s+cannot reach host \(1h ago\)/)
+    expect(lines[2]).toMatch(/ws\s+ws\s+\/srv\/p \(\+2 old\)\s+2d ago\s+cannot reach host \(1h ago\)/)
     expect(lines[3]).toMatch(/mbp .*this machine, skipped/)
     expect(lines[4]).toMatch(/new .*never\s+not synced yet/)
   })

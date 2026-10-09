@@ -75,6 +75,7 @@ These are ours, valid with any ccusage command and with `sync`:
 
 ```sh
 ccusage-sync hosts add <name> <ssh-target> [--path <remote-path>]... [--no-verify]
+ccusage-sync hosts edit <name> [--ssh <ssh-target>] [--path <remote-path>]... [--no-verify]
 ccusage-sync hosts remove <name> [--purge]
 ccusage-sync hosts list               # ssh target, paths, last sync, last error
 ccusage-sync sync [--hosts a,b]       # sync now, regardless of syncMaxAge
@@ -84,6 +85,8 @@ ccusage-sync sync [--hosts a,b]       # sync now, regardless of syncMaxAge
   default it mirrors `~/.claude/projects` and `~/.config/claude/projects`, the two places ccusage looks. If a host
   keeps its logs elsewhere (for example it sets `CLAUDE_CONFIG_DIR`), pass `--path <dir>/projects` once per location.
   `--no-verify` saves the host without connecting to it.
+- **`hosts edit`** replaces a host's SSH target or paths (all of them, if any `--path` is given), and checks the host
+  again like `hosts add`. Its mirror is kept: logs already mirrored from paths it no longer has stay in reports.
 - **`hosts remove`** removes the host and asks whether to delete its mirrored logs. Without a terminal it keeps them;
   `--purge` deletes them without asking.
 
@@ -134,7 +137,10 @@ case-insensitive. SSH aliases are not resolved, so if you rely on that, name the
 ### Where mirrors live
 
 `~/.local/share/ccusage-sync/hosts/<name>/` (or `$XDG_DATA_HOME/ccusage-sync/…`), one subdirectory per remote path,
-plus `state.json` with the last sync attempt, success and error. With `"store": "usage"` there is also `index.json`,
+plus `state.json` with the last sync attempt, success and error. A subdirectory for a path the host no longer has is
+kept, read and pruned like the others; `hosts list` counts these as `(+N old)`. Delete one yourself if you don't want
+its logs any more. Reports aren't inflated when two subdirectories hold the same transcripts, since ccusage counts each
+message once. With `"store": "usage"` there is also `index.json`,
 recording how much of each remote file has been fetched.
 
 Only `*.jsonl` files are copied, and syncs are incremental. Files the host deletes are not deleted from the mirror;

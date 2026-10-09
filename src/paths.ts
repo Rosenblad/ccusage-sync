@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs'
+import { readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 
@@ -64,4 +64,27 @@ function isDir(path: string): boolean {
 /** A valid ccusage root is a dir containing `projects/`, or the `projects/` dir itself. */
 export function hasProjects(root: string): boolean {
   return isDir(join(root, 'projects')) || (basename(root) === 'projects' && isDir(root))
+}
+
+/**
+ * Slots in a host's mirror dir that aren't for any of `remotePaths`: left over from paths the host no longer has
+ * configured. They still hold history the host may have deleted, so they are read, pruned and migrated like the rest.
+ */
+export function leftoverSlots(dir: string, remotePaths: string[]): string[] {
+  const current = remotePaths.map(slotName)
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && !current.includes(entry.name) && isDir(join(dir, entry.name, 'projects')))
+    .map((entry) => entry.name)
+    .sort()
+}
+
+/** Every slot of a host: those of its current paths (which may not exist yet), then leftover ones. */
+export function hostSlots(dir: string, remotePaths: string[]): string[] {
+  return [...new Set(remotePaths.map(slotName)), ...leftoverSlots(dir, remotePaths)]
 }

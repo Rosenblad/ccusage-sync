@@ -192,6 +192,19 @@ describe('syncHost with store "usage"', () => {
     expect(t.index()['-p/s1.jsonl']).toEqual({ offset: text.length, size: slimmed(text).length, sessionSettled: true })
   })
 
+  it('slims a slot left over from a path the host no longer has', async () => {
+    const t = setup()
+    const text = lines(user(), line(1))
+    const old = join(slotDir(t.data, 'box', '.config/claude/projects'), 'projects', '-p/s0.jsonl')
+    mkdirSync(dirname(old), { recursive: true })
+    writeFileSync(old, text)
+    await t.sync()
+    expect(readFileSync(old, 'utf8')).toBe(slimmed(text))
+    expect(readIndex(hostDir(t.data, 'box'))._config_claude_projects).toEqual({
+      '-p/s0.jsonl': { offset: text.length, size: slimmed(text).length, sessionSettled: true },
+    })
+  })
+
   it('after a format change, fetches every mirrored file again, even one older than the window', async () => {
     const t = setup()
     t.write('-p/new.jsonl', lines(line(1)))

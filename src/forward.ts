@@ -1,8 +1,9 @@
 import { spawn as nodeSpawn } from 'node:child_process'
+import { join } from 'node:path'
 import type { CcusageCommand } from './ccusage.js'
 import { LOCAL } from './argv.js'
 import { type Config, type HostConfig, hostPaths, isLocalHost } from './config.js'
-import { type Env, hasProjects, slotDir } from './paths.js'
+import { type Env, hasProjects, hostDir, hostSlots } from './paths.js'
 import { type SignalSource, signalExitCode, trapSignals } from './signals.js'
 
 export interface Selection {
@@ -28,8 +29,12 @@ export function selectSources(config: Config, hostsFlag: string[] | undefined, l
   }
 }
 
+/** Each host's slots, including ones left over from paths it no longer has. */
 export function mirrorRoots(dataDir: string, hosts: HostConfig[]): string[] {
-  return hosts.flatMap((host) => hostPaths(host).map((path) => slotDir(dataDir, host.name, path)))
+  return hosts.flatMap((host) => {
+    const dir = hostDir(dataDir, host.name)
+    return hostSlots(dir, hostPaths(host)).map((slot) => join(dir, slot))
+  })
 }
 
 /** Local roots first, then mirrors. Only roots ccusage would accept (containing `projects/`) are kept. */

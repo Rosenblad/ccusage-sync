@@ -445,6 +445,17 @@ describe('syncHost', () => {
     expect(existsSync(older)).toBe(false)
   })
 
+  it('prunes slots left over from paths the host no longer has', async () => {
+    const data = tempDir()
+    const at = now()
+    const old = mirrored(data, '/srv/old/projects', '-p/old.jsonl', at, 40 * DAY)
+    const fresh = mirrored(data, '/srv/old/projects', '-p/fresh.jsonl', at, DAY)
+    const run = fakeRunner({ files: { '.claude/projects': [] } })
+    expect(await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })).toMatchObject({ status: 'ok', bytesPruned: 100 })
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
+  })
+
   it('keeps everything without a retention window', async () => {
     const data = tempDir()
     const old = mirrored(data, '.claude/projects', '-p/old.jsonl', now(), 400 * DAY)

@@ -58,6 +58,17 @@ describe('buildRoots', () => {
       '/d/hosts/b/_srv_p',
     ])
   })
+
+  it('also lists slots left over from paths a host no longer has', () => {
+    const dir = tempDir()
+    for (const slot of ['_srv_p', '_old', '_claude_projects']) mkdirSync(join(dir, 'hosts', 'b', slot, 'projects'), { recursive: true })
+    mkdirSync(join(dir, 'hosts', 'b', '_no_projects_dir'), { recursive: true })
+    expect(mirrorRoots(dir, [{ name: 'b', ssh: 'b', paths: ['/srv/p'] }])).toEqual([
+      join(dir, 'hosts/b/_srv_p'),
+      join(dir, 'hosts/b/_claude_projects'),
+      join(dir, 'hosts/b/_old'),
+    ])
+  })
 })
 
 /** A fake child process plus a spawn that returns it and records its arguments. */

@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import pc from 'picocolors'
 import { UsageError } from './argv.js'
 import {
@@ -10,7 +11,7 @@ import {
   saveConfig,
   validateHostName,
 } from './config.js'
-import { hostDir } from './paths.js'
+import { hostDir, leftoverSlots } from './paths.js'
 import { formatAgo, readState, type Runner, shellQuote } from './sync.js'
 
 export interface HostsDeps {
@@ -27,6 +28,7 @@ export interface HostsDeps {
 
 export const HOSTS_USAGE = `Usage:
   ccusage-sync hosts add <name> <ssh-target> [--path <remote-path>]... [--no-verify]
+  ccusage-sync hosts edit <name> [--ssh <ssh-target>] [--path <remote-path>]... [--no-verify]
   ccusage-sync hosts remove <name> [--purge]
   ccusage-sync hosts list
 `
@@ -36,6 +38,8 @@ export async function hostsCommand(args: string[], deps: HostsDeps): Promise<num
   switch (sub) {
     case 'add':
       return addHost(rest, deps)
+    case 'edit':
+      return editHost(rest, deps)
     case 'remove':
     case 'rm':
       return removeHost(rest, deps)
@@ -83,19 +87,16 @@ async function addHost(args: string[], deps: HostsDeps): Promise<number> {
   if (positionals.length !== 2) throw new UsageError(`hosts add expects <name> <ssh-target>.\n${HOSTS_USAGE}`)
   const [name, ssh] = positionals as [string, string]
   validateHostName(name)
-  if (ssh.trim() === '') throw new UsageError('ssh target must not be empty')
+  checkSsh(ssh)
 
   const config = loadConfig(deps.configFile)
   if (config.hosts.some((host) => host.name === name)) {
-    throw new UsageError(`Host '${name}' already exists. Remove it first with: ccusage-sync hosts remove ${name}`)
+    throw new UsageError(`Host '${name}' already exists. Change it with: ccusage-sync hosts edit ${name}`)
   }
 
   const host: HostConfig = { name, ssh }
-  const paths = values.get('--path')?.map(normalizeRemotePath)
-  if (paths) {
-    if (paths.some((path) => path === '')) throw new UsageError('--path must not be empty')
-    host.paths = [...new Set(paths)]
-  }
+  const paths = values.get('--path')
+  if (paths) host.paths = parsePaths(paths)
 
   if (!bools.has('--no-verify')) {
     const ok = await verifyHost(host, deps)
@@ -109,6 +110,59 @@ async function addHost(args: string[], deps: HostsDeps): Promise<number> {
     deps.stderr(`Note: ${name} looks like this machine, so it is skipped here (its logs are read locally).\n`)
   }
   return 0
+}
+
+/** Replaces the given fields in place. The mirror is kept, including slots for paths the host no longer has. */
+async function editHost(args: string[], deps: HostsDeps): Promise<number> {
+  const { positionals, bools, values } = parseFlags(args, ['--no-verify'], ['--ssh', '--path'])
+  if (positionals.length !== 1) throw new UsageError(`hosts edit expects <name>.\n${HOSTS_USAGE}`)
+  const name = positionals[0]!
+  validateHostName(name)
+  const ssh = values.get('--ssh')
+  const paths = values.get('--path')
+  if (!ssh && !paths) throw new UsageError(`hosts edit expects --ssh or --path.\n${HOSTS_USAGE}`)
+  if (ssh && ssh.length > 1) throw new UsageError('--ssh may only be given once')
+
+  const config = loadConfig(deps.configFile)
+  const i = config.hosts.findIndex((host) => host.name === name)
+  if (i === -1) {
+    throw new UsageError(`Unknown host '${name}'. Configured: ${config.hosts.map((host) => host.name).join(', ') || '(none)'}`)
+  }
+  const host: HostConfig = { ...config.hosts[i]! }
+  if (ssh) host.ssh = checkSsh(ssh[0]!)
+  if (paths) host.paths = parsePaths(paths)
+
+  if (!bools.has('--no-verify')) {
+    const ok = await verifyHost(host, deps)
+    if (!ok) return 1
+  }
+
+  config.hosts[i] = host
+  saveConfig(deps.configFile, config)
+  deps.stdout(`Updated ${name} (${host.ssh}, ${hostPaths(host).join(', ')}).\n`)
+  const dir = hostDir(deps.dataDir, name)
+  const leftover = leftoverSlots(dir, hostPaths(host))
+  if (leftover.length > 0) {
+    deps.stdout(
+      `Logs mirrored from paths it no longer has are kept and still included in reports: ${leftover.map((slot) => join(dir, slot)).join(', ')}\n`,
+    )
+  }
+  if (isLocalHost(host, deps.hostname)) {
+    deps.stderr(`Note: ${name} looks like this machine, so it is skipped here (its logs are read locally).\n`)
+  }
+  return 0
+}
+
+function checkSsh(ssh: string): string {
+  if (ssh.trim() === '') throw new UsageError('ssh target must not be empty')
+  return ssh
+}
+
+/** `--path` values, normalized and deduplicated. */
+function parsePaths(values: string[]): string[] {
+  const paths = values.map(normalizeRemotePath)
+  if (paths.some((path) => path === '')) throw new UsageError('--path must not be empty')
+  return [...new Set(paths)]
 }
 
 /** Fails if the host is unreachable; warns (but succeeds) if none of the paths exist there. */
@@ -135,7 +189,8 @@ async function verifyHost(host: HostConfig, deps: HostsDeps): Promise<boolean> {
   if (found.length === 0) {
     deps.stderr(
       `${pc.yellow('Warning:')} none of these paths exist on ${host.ssh}: ${paths.join(', ')}\n` +
-        `Saving anyway. If Claude Code keeps its logs elsewhere there, re-add the host with --path <dir>/projects.\n`,
+        `Saving anyway. If Claude Code keeps its logs elsewhere there, point at them with: ` +
+        `ccusage-sync hosts edit ${host.name} --path <dir>/projects\n`,
     )
   }
   return true
@@ -196,13 +251,16 @@ function listHosts(args: string[], deps: HostsDeps): number {
   const now = deps.now()
   const ago = (iso: string | null) => (iso ? formatAgo(now.getTime() - Date.parse(iso)) : 'never')
   const rows = config.hosts.map((host) => {
-    const state = readState(hostDir(deps.dataDir, host.name))
+    const dir = hostDir(deps.dataDir, host.name)
+    const state = readState(dir)
     let status: string
     if (isLocalHost(host, deps.hostname)) status = pc.dim('this machine, skipped')
     else if (state.lastError) status = pc.red(`${state.lastError} (${ago(state.lastAttempt)})`)
     else if (state.lastSuccess) status = pc.green('ok')
     else status = pc.dim('not synced yet')
-    return [host.name, host.ssh, hostPaths(host).join(', '), ago(state.lastSuccess), status]
+    const leftover = leftoverSlots(dir, hostPaths(host)).length
+    const paths = `${hostPaths(host).join(', ')}${leftover > 0 ? ` (+${leftover} old)` : ''}`
+    return [host.name, host.ssh, paths, ago(state.lastSuccess), status]
   })
   const header = ['NAME', 'SSH', 'PATHS', 'LAST SYNC', 'STATUS']
   const widths = header.map((title, i) => Math.max(title.length, ...rows.map((row) => row[i]!.length)))

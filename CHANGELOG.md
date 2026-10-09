@@ -7,6 +7,16 @@ report output.
 
 ## [Unreleased]
 
+### Added
+
+- `hosts edit <name> [--ssh <target>] [--path <p>]...` changes a host in place, keeping its mirror.
+
+### Fixed
+
+- Logs mirrored from a path a host no longer has are now read, pruned and slimmed like the rest. Before, changing a
+  host's `paths` dropped them from reports without a warning. `hosts list` shows how many such directories each host
+  has.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added

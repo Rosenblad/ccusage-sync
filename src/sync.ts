@@ -383,6 +383,19 @@ export function prune(dir: string, cutoffMs: number): number {
   return freed
 }
 
+/** Removes a slot's `projects/` if it is empty, then the slot if that leaves it empty. Returns whether `projects/` went. */
+function removeEmptySlot(slot: string): boolean {
+  try {
+    rmdirSync(join(slot, 'projects')) // Fails unless empty.
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+  }
+  try {
+    rmdirSync(slot)
+  } catch {}
+  return true
+}
+
 export interface SyncDeps {
   dataDir: string
   run: Runner
@@ -482,9 +495,16 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
 
     // Pruned even when the host can't be reached: retention is about the age of what is kept here.
     let bytesPruned = 0
+    let kept = slots
     if (deps.retentionMs !== undefined) {
       const cutoff = deps.now().getTime() - deps.retentionMs - PRUNE_MARGIN_MS
-      for (const slot of slots) bytesPruned += prune(join(dir, slot, 'projects'), cutoff)
+      const current = paths.map(slotName)
+      kept = slots.filter((slot) => {
+        const projects = join(dir, slot, 'projects')
+        bytesPruned += prune(projects, cutoff)
+        // A leftover slot retention has emptied goes, so it is no longer listed or read. Current ones refill.
+        return current.includes(slot) || !removeEmptySlot(join(dir, slot))
+      })
     }
     if (mirror === 'usage') forgetMissing(dir)
 
@@ -495,7 +515,7 @@ export async function syncHost(host: HostConfig, deps: SyncDeps): Promise<HostOu
       lastError: error ?? null,
     }
     if (mirror) state.store = mirror
-    state.slots = slots
+    state.slots = kept
     writeState(dir, state)
     if (error) return { name: host.name, status: 'failed', error, lastSuccess: state.lastSuccess }
     return { name: host.name, status: 'ok', bytesAdded, bytesPruned, durationMs: finished.getTime() - started.getTime() }

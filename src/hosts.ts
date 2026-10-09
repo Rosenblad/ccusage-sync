@@ -12,7 +12,7 @@ import {
   validateHostName,
 } from './config.js'
 import { hostDir, leftoverSlots } from './paths.js'
-import { formatAgo, readState, type Runner, shellQuote } from './sync.js'
+import { formatAgo, knownSlots, readState, type Runner, shellQuote } from './sync.js'
 
 export interface HostsDeps {
   configFile: string
@@ -141,7 +141,7 @@ async function editHost(args: string[], deps: HostsDeps): Promise<number> {
   saveConfig(deps.configFile, config)
   deps.stdout(`Updated ${name} (${host.ssh}, ${hostPaths(host).join(', ')}).\n`)
   const dir = hostDir(deps.dataDir, name)
-  const leftover = leftoverSlots(dir, hostPaths(host))
+  const leftover = leftoverSlots(dir, knownSlots(dir), hostPaths(host))
   if (leftover.length > 0) {
     deps.stdout(
       `Logs mirrored from paths it no longer has are kept and still included in reports: ${leftover.map((slot) => join(dir, slot)).join(', ')}\n`,
@@ -258,7 +258,7 @@ function listHosts(args: string[], deps: HostsDeps): number {
     else if (state.lastError) status = pc.red(`${state.lastError} (${ago(state.lastAttempt)})`)
     else if (state.lastSuccess) status = pc.green('ok')
     else status = pc.dim('not synced yet')
-    const leftover = leftoverSlots(dir, hostPaths(host)).length
+    const leftover = leftoverSlots(dir, knownSlots(dir, state), hostPaths(host)).length
     const paths = `${hostPaths(host).join(', ')}${leftover > 0 ? ` (+${leftover} old)` : ''}`
     return [host.name, host.ssh, paths, ago(state.lastSuccess), status]
   })

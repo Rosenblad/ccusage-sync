@@ -456,6 +456,23 @@ describe('syncHost', () => {
     expect(existsSync(fresh)).toBe(true)
   })
 
+  it('records its slots, and leaves alone dirs it did not create', async () => {
+    const data = tempDir()
+    const at = now()
+    mirrored(data, '/srv/old/projects', '-p/a.jsonl', at, DAY)
+    const run = fakeRunner({ files: { '.claude/projects': [] } })
+    await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })
+    expect(readState(hostDir(data, 'laptop')).slots).toEqual(['_srv_old_projects', '_claude_projects', '_config_claude_projects'])
+
+    const copy = join(hostDir(data, 'laptop'), '_srv_old_projects_backup', 'projects', '-p', 'old.jsonl')
+    mkdirSync(dirname(copy), { recursive: true })
+    writeFileSync(copy, 'x')
+    utimesSync(copy, new Date(at.getTime() - 40 * DAY), new Date(at.getTime() - 40 * DAY))
+    expect(await syncHost(host, { dataDir: data, run, now, retentionMs: 30 * DAY })).toMatchObject({ status: 'ok', bytesPruned: 0 })
+    expect(existsSync(copy)).toBe(true)
+    expect(readState(hostDir(data, 'laptop')).slots).toHaveLength(3)
+  })
+
   it('keeps everything without a retention window', async () => {
     const data = tempDir()
     const old = mirrored(data, '.claude/projects', '-p/old.jsonl', now(), 400 * DAY)
@@ -483,7 +500,7 @@ describe('syncHost', () => {
       name: 'laptop',
       status: 'interrupted',
     })
-    expect(existsSync(join(hostDir(data, 'laptop'), 'state.json'))).toBe(false)
+    expect(readState(hostDir(data, 'laptop')).lastAttempt).toBeNull()
     expect(existsSync(join(hostDir(data, 'laptop'), '.lock'))).toBe(false)
     expect(existsSync(old)).toBe(true)
   })

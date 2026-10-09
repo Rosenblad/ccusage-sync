@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { configFile, dataDir, hasProjects, hostSlots, leftoverSlots, localRoots, slotDir, slotName } from '../src/paths.js'
+import { configFile, dataDir, hasProjects, hostSlots, leftoverSlots, localRoots, scanSlots, slotDir, slotName } from '../src/paths.js'
 import { tempDir } from './helpers.js'
 
 const home = '/home/u'
@@ -49,14 +49,21 @@ describe('slots', () => {
     expect(slotDir('/d', 'laptop', '.claude/projects')).toBe('/d/hosts/laptop/_claude_projects')
   })
 
-  it('finds slots left over from paths no longer configured: dirs holding projects/', () => {
+  it('finds slots on disk: dirs holding projects/, named as slotName names them', () => {
     const dir = tempDir()
-    for (const slot of ['_b', '_a', '_current']) mkdirSync(join(dir, slot, 'projects'), { recursive: true })
+    for (const slot of ['_b', '_a', '_a.bak', 'old,2025', '_a copy']) mkdirSync(join(dir, slot, 'projects'), { recursive: true })
     mkdirSync(join(dir, 'projects')) // a slot named projects, but without projects/ inside
     writeFileSync(join(dir, 'state.json'), '{}')
-    expect(leftoverSlots(dir, ['/current'])).toEqual(['_a', '_b'])
-    expect(hostSlots(dir, ['/new', '/current', '/current'])).toEqual(['_new', '_current', '_a', '_b'])
-    expect(leftoverSlots(join(dir, 'missing'), [])).toEqual([])
+    expect(scanSlots(dir)).toEqual(['_a', '_b'])
+    expect(scanSlots(join(dir, 'missing'))).toEqual([])
+  })
+
+  it('finds known slots left over from paths no longer configured, if they still hold projects/', () => {
+    const dir = tempDir()
+    for (const slot of ['_b', '_a', '_current', '_unknown']) mkdirSync(join(dir, slot, 'projects'), { recursive: true })
+    const known = ['_current', '_b', '_a', '_deleted']
+    expect(leftoverSlots(dir, known, ['/current'])).toEqual(['_a', '_b'])
+    expect(hostSlots(dir, known, ['/new', '/current', '/current'])).toEqual(['_new', '_current', '_a', '_b'])
   })
 })
 
